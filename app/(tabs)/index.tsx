@@ -11,7 +11,7 @@ export default function HomeScreen() {
   return (
     <>
       <View>
-        <Text>Welcome to the Home Screen!</Text>
+        <Text>Đào huy đẩy code</Text>
         <Button title="Press me!" onPress={() => alert('Huy day')} />
       </View>
     </>
