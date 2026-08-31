@@ -11,12 +11,14 @@
 
 ## ⚡ Quick Start
 
-### 1. Tạo tài khoản Admin
+### Admin Web System
+
+#### 1. Tạo tài khoản Admin
 ```sql
 -- Chạy file CREATE_ADMIN.sql trong SQL Server Management Studio
 ```
 
-### 2. Khởi động hệ thống
+#### 2. Khởi động hệ thống
 ```powershell
 # Backend (Terminal 1)
 cd backend
@@ -27,10 +29,31 @@ cd frontend-admin
 npm run dev
 ```
 
-### 3. Đăng nhập
+#### 3. Đăng nhập
 Truy cập: http://localhost:5173
 - **Username:** `admin`
 - **Password:** `admin123`
+
+### Mobile App (React Native)
+
+#### 1. Start the app
+```bash
+npx expo start
+```
+
+In the output, you'll find options to open the app in a:
+- [Development build](https://docs.expo.dev/develop/development-builds/introduction/)
+- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+- [Expo Go](https://expo.dev/go)
+
+You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+
+#### 2. Get a fresh project
+When you're ready, run:
+```bash
+npm run reset-project
+```
 
 ---
 
