@@ -1,0 +1,62 @@
+feat: Nâng cấp module Quản lý sản phẩm và Nhân viên với upload ảnh
+
+✨ Tính năng mới:
+- Thêm chức năng upload hình ảnh sản phẩm
+- CRUD đầy đủ cho module Quản lý nhân viên
+- Thêm module Giao hàng và Hoàn đổi trả
+- Hiển thị thumbnail ảnh 60x60px trong bảng sản phẩm
+
+📦 Backend Changes:
+- Cài đặt multer cho upload file
+- Tạo API POST /api/upload (upload ảnh sản phẩm)
+- Tạo API DELETE /api/upload/:filename (xóa ảnh)
+- Thêm static middleware /uploads cho serve ảnh
+- Tạo CRUD API cho nhân viên (/api/nhanvien)
+- Tạo API cho giao hàng (/api/giaohang)
+- Tạo API cho hoàn đổi trả (/api/hoandoitra)
+- Cập nhật database config để hỗ trợ Unicode
+
+🎨 Frontend Changes:
+- Cập nhật trang Products với upload component
+- Thêm preview ảnh khi chọn file
+- Validation: JPG/PNG/WEBP, max 5MB
+- Placeholder SVG khi không có ảnh
+- Hoàn thiện trang Staff với CRUD đầy đủ
+- Thêm trang Deliveries và Returns
+- Thêm menu điều hướng cho các module mới
+- Cài đặt @heroicons/react cho icons
+
+📄 Database & Documentation:
+- Thêm bảng GiaoHang và HoanDoiTra
+- Script tạo dữ liệu mẫu
+- Tài liệu hướng dẫn sử dụng các module
+
+🔧 Technical Details:
+- Multer disk storage lưu vào uploads/products/
+- Filename pattern: [basename]-[timestamp]-[random].[ext]
+- Tách biệt upload và save product data
+- Responsive design với Tailwind CSS
+
+Files Modified:
+- backend/package.json (+multer, +@types/multer)
+- backend/src/config/database.ts
+- backend/src/routes/nhanvien.ts
+- backend/src/server.ts
+- frontend-admin/package.json (+@heroicons/react)
+- frontend-admin/src/App.tsx
+- frontend-admin/src/components/Layout.tsx
+- frontend-admin/src/pages/Products.tsx
+- frontend-admin/src/pages/Staff.tsx
+
+Files Added:
+- backend/src/routes/upload.ts
+- backend/src/routes/giaohang.ts
+- backend/src/routes/hoandoitra.ts
+- backend/uploads/ (thư mục lưu ảnh)
+- frontend-admin/src/pages/Deliveries.tsx
+- frontend-admin/src/pages/DeliveryDetail.tsx
+- frontend-admin/src/pages/Returns.tsx
+- frontend-admin/src/pages/ReturnDetail.tsx
+- ADD_DELIVERY_RETURN_TABLES.sql
+- INSERT_SAMPLE_DATA.sql
+- Các file tài liệu *.md
