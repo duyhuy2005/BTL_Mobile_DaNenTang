@@ -1,6 +1,7 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import path from 'path';
 import { getPool } from './config/database';
 
 dotenv.config();
@@ -13,14 +14,20 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files - uploads
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // Import routes
 import authRoutes from './routes/auth';
 import danhmucRoutes from './routes/danhmuc';
 import dashboardRoutes from './routes/dashboard';
+import giaohangRoutes from './routes/giaohang';
 import hoadonRoutes from './routes/hoadon';
+import hoandoitraRoutes from './routes/hoandoitra';
 import khachhangRoutes from './routes/khachhang';
 import nhanvienRoutes from './routes/nhanvien';
 import sanphamRoutes from './routes/sanpham';
+import uploadRoutes from './routes/upload';
 
 import { authenticate, authorizeAdmin } from './middleware/auth';
 
@@ -32,8 +39,11 @@ app.use('/api/dashboard', authenticate, authorizeAdmin, dashboardRoutes);
 app.use('/api/sanpham', authenticate, sanphamRoutes);
 app.use('/api/danhmuc', authenticate, danhmucRoutes);
 app.use('/api/hoadon', authenticate, hoadonRoutes);
+app.use('/api/giaohang', authenticate, giaohangRoutes);
+app.use('/api/hoandoitra', authenticate, hoandoitraRoutes);
 app.use('/api/khachhang', authenticate, khachhangRoutes);
 app.use('/api/nhanvien', authenticate, nhanvienRoutes);
+app.use('/api/upload', authenticate, uploadRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -73,8 +83,12 @@ async function startServer() {
       console.log('      GET    /api/danhmuc');
       console.log('      GET    /api/hoadon');
       console.log('      GET    /api/hoadon/:id/pdf');
+      console.log('      GET    /api/giaohang');
+      console.log('      GET    /api/hoandoitra');
       console.log('      GET    /api/khachhang');
       console.log('      GET    /api/nhanvien');
+      console.log('      POST   /api/upload (Upload ảnh)');
+      console.log('      GET    /uploads/products/:filename');
       console.log('═══════════════════════════════════════════════════════');
       console.log('');
     });

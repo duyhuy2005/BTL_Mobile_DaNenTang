@@ -14,6 +14,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { path: '/categories', icon: '📁', label: 'Danh mục' },
     { path: '/customers', icon: '👥', label: 'Khách hàng' },
     { path: '/invoices', icon: '🧾', label: 'Hóa đơn' },
+    { path: '/deliveries', icon: '🚚', label: 'Giao hàng' },
+    { path: '/returns', icon: '↩️', label: 'Hoàn đổi trả' },
     { path: '/staff', icon: '👔', label: 'Nhân viên' },
   ];
 

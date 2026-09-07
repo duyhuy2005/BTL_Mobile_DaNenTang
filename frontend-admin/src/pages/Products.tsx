@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import axios from 'axios';
 import { categoriesAPI, productsAPI } from '../services/api';
 import { formatCurrency } from '../utils/format';
 
@@ -13,6 +14,9 @@ export default function Products() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingProduct, setDeletingProduct] = useState<any>(null);
   const [editingProduct, setEditingProduct] = useState<any>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>('');
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     loadCategories();
@@ -58,6 +62,64 @@ export default function Products() {
     loadProducts();
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Chỉ chấp nhận file ảnh (JPG, JPEG, PNG, WEBP)');
+      return;
+    }
+
+    // Validate file size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Kích thước file không được vượt quá 5MB');
+      return;
+    }
+
+    setImageFile(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = () => {
+    setImageFile(null);
+    setImagePreview('');
+  };
+
+  const uploadImage = async (): Promise<string | null> => {
+    if (!imageFile) return null;
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', imageFile);
+
+      const token = localStorage.getItem('token');
+      const response = await axios.post('http://localhost:3000/api/upload', formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      return response.data.data.url;
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      alert(error.response?.data?.message || 'Lỗi upload ảnh');
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const openDeleteModal = (product: any) => {
     setDeletingProduct(product);
     setShowDeleteModal(true);
@@ -79,20 +141,46 @@ export default function Products() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
-    const data = Object.fromEntries(formData.entries());
+    const data: any = Object.fromEntries(formData.entries());
 
     try {
+      // Upload image if new file selected
+      if (imageFile) {
+        const imageUrl = await uploadImage();
+        if (imageUrl) {
+          data.HinhAnh = imageUrl;
+        }
+      } else if (editingProduct && !imagePreview) {
+        // Keep old image if editing and no new image
+        data.HinhAnh = editingProduct.HinhAnh;
+      }
+
       if (editingProduct) {
         await productsAPI.update(editingProduct.MaSanPham, data);
       } else {
         await productsAPI.create(data);
       }
+      
       setShowModal(false);
       setEditingProduct(null);
+      setImageFile(null);
+      setImagePreview('');
       loadProducts();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Lưu thất bại');
     }
+  };
+
+  const openModal = (product?: any) => {
+    if (product) {
+      setEditingProduct(product);
+      setImagePreview(product.HinhAnh ? `http://localhost:3000${product.HinhAnh}` : '');
+    } else {
+      setEditingProduct(null);
+      setImagePreview('');
+    }
+    setImageFile(null);
+    setShowModal(true);
   };
 
   // Tính trạng thái dựa trên số lượng
@@ -173,7 +261,7 @@ export default function Products() {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-800">2. Quản lý sản phẩm</h1>
           <button
-            onClick={() => { setShowModal(true); setEditingProduct(null); }}
+            onClick={() => openModal()}
             className="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold"
           >
             + Thêm sản phẩm
@@ -218,6 +306,7 @@ export default function Products() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">STT</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hình ảnh</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tên sản phẩm</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Danh mục</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Thương hiệu</th>
@@ -230,7 +319,7 @@ export default function Products() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {products.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-4 text-center text-gray-500">Không có dữ liệu</td>
+                      <td colSpan={9} className="px-6 py-4 text-center text-gray-500">Không có dữ liệu</td>
                     </tr>
                   ) : (
                     products.map((product, idx) => {
@@ -238,6 +327,24 @@ export default function Products() {
                       return (
                         <tr key={product.MaSanPham} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap">{(pagination.page - 1) * pagination.limit + idx + 1}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {product.HinhAnh ? (
+                              <img 
+                                src={`http://localhost:3000${product.HinhAnh}`} 
+                                alt={product.TenSanPham}
+                                className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                                onError={(e) => {
+                                  e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="%23d1d5db" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
+                                }}
+                              />
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-100 rounded-lg border border-gray-200 flex items-center justify-center">
+                                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                              </div>
+                            )}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap font-medium">{product.TenSanPham}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{product.TenDanhMuc}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{product.ThuongHieu || '-'}</td>
@@ -252,7 +359,7 @@ export default function Products() {
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex gap-2">
                               <button
-                                onClick={() => { setEditingProduct(product); setShowModal(true); }}
+                                onClick={() => openModal(product)}
                                 className="text-blue-600 hover:text-blue-800"
                                 title="Sửa"
                               >
@@ -342,6 +449,66 @@ export default function Products() {
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-6">{editingProduct ? 'Sửa sản phẩm' : 'Thêm sản phẩm'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Hình ảnh sản phẩm */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Hình ảnh sản phẩm</label>
+                <div className="flex items-start gap-4">
+                  {/* Preview */}
+                  <div className="flex-shrink-0">
+                    {imagePreview ? (
+                      <div className="relative">
+                        <img 
+                          src={imagePreview} 
+                          alt="Preview" 
+                          className="w-32 h-32 object-cover rounded-lg border-2 border-gray-300"
+                        />
+                        <button
+                          type="button"
+                          onClick={removeImage}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-32 h-32 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
+                        <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Upload button */}
+                  <div className="flex-1">
+                    <input
+                      type="file"
+                      id="imageInput"
+                      accept="image/jpeg,image/jpg,image/png,image/webp"
+                      onChange={handleImageChange}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="imageInput"
+                      className="inline-block px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg cursor-pointer border border-gray-300"
+                    >
+                      <svg className="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      Chọn ảnh
+                    </label>
+                    <p className="text-xs text-gray-500 mt-2">
+                      JPG, JPEG, PNG, WEBP (Tối đa 5MB)
+                    </p>
+                    {uploading && (
+                      <p className="text-sm text-pink-600 mt-2">Đang upload...</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium mb-2">Tên sản phẩm *</label>
                 <input 
@@ -414,24 +581,17 @@ export default function Products() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                 ></textarea>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Hình ảnh (URL)</label>
-                <input 
-                  name="HinhAnh" 
-                  defaultValue={editingProduct?.HinhAnh} 
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" 
-                />
-              </div>
               <div className="flex gap-3 pt-4">
                 <button 
                   type="submit" 
-                  className="flex-1 bg-pink-500 hover:bg-pink-600 text-white py-2 rounded-lg font-medium"
+                  disabled={uploading}
+                  className="flex-1 bg-pink-500 hover:bg-pink-600 text-white py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {editingProduct ? 'Cập nhật' : 'Thêm mới'}
+                  {uploading ? 'Đang xử lý...' : (editingProduct ? 'Cập nhật' : 'Thêm mới')}
                 </button>
                 <button 
                   type="button" 
-                  onClick={() => { setShowModal(false); setEditingProduct(null); }} 
+                  onClick={() => { setShowModal(false); setEditingProduct(null); setImageFile(null); setImagePreview(''); }} 
                   className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded-lg font-medium"
                 >
                   Hủy
