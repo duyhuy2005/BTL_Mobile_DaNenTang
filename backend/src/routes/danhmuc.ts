@@ -81,7 +81,7 @@ router.put('/:id', async (req, res) => {
       WHERE MaDanhMuc = @id
     `, { TenDanhMuc, MoTa, HinhAnh, TrangThai, id: Number(req.params.id) });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy danh mục' });
     }
     
@@ -97,7 +97,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const result = await execute('DELETE FROM DanhMuc WHERE MaDanhMuc = @id', { id: Number(req.params.id) });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy danh mục' });
     }
     

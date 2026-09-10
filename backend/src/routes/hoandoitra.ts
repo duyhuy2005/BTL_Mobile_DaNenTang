@@ -1,450 +1,536 @@
 import { Router } from 'express';
 import { execute, query, queryOne, sql, getPool } from '../config/database';
+import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// GET all return requests with pagination and filters
+// ── helpers ──────────────────────────────────────────────────────────────────
+const STATUS_LABEL: Record<string, string> = {
+  'Cho xu ly':    'Chờ xử lý',
+  'Tiep nhan':    'Đang tiếp nhận',
+  'Kiem tra':     'Đang kiểm tra',
+  'Cho duyet':    'Chờ Admin duyệt',
+  'Da duyet':     'Đã duyệt',
+  'Tu choi':      'Từ chối',
+  'Hoan tien':    'Đã hoàn tiền',
+  'Hoan tat':     'Hoàn tất',
+  'Huy':          'Đã hủy',
+  // legacy
+  'Chờ xử lý':   'Chờ xử lý',
+  'Đang xử lý':  'Đang tiếp nhận',
+  'Đã duyệt':    'Đã duyệt',
+  'Từ chối':     'Từ chối',
+  'Hoàn tất':    'Hoàn tất',
+};
+
+function logHistory(
+  transaction: InstanceType<typeof sql.Transaction>,
+  maHDT: number, oldStatus: string | null, newStatus: string,
+  nguoiThayDoi: number | null, ghiChu?: string
+) {
+  const r = new sql.Request(transaction);
+  r.input('mhdt', sql.Int,          maHDT);
+  r.input('cu',   sql.NVarChar(50),  oldStatus ?? null);
+  r.input('moi',  sql.NVarChar(50),  newStatus);
+  r.input('ntd',  sql.Int,          nguoiThayDoi ?? null);
+  r.input('gc',   sql.NVarChar(500), ghiChu ?? null);
+  return r.query(`
+    INSERT INTO LichSuTrangThaiHoanTra
+      (MaHoanDoiTra, TrangThaiCu, TrangThaiMoi, NguoiThayDoi, GhiChu)
+    VALUES (@mhdt, @cu, @moi, @ntd, @gc)
+  `);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /api/hoandoitra  — danh sách + filter + phân trang
+// ══════════════════════════════════════════════════════════════════════════════
 router.get('/', async (req, res) => {
   try {
-    const { search, type, status, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const { search, loai, status, tuNgay, denNgay, page = 1, limit = 10 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-    
-    let sqlQuery = `
-      SELECT 
-        HoanDoiTra.*,
-        KhachHang.HoTen as TenKhachHang,
-        KhachHang.SoDienThoai,
-        NhanVien.HoTen as TenNguoiXuLy,
-        (SELECT COUNT(*) FROM ChiTietHoanDoiTra WHERE ChiTietHoanDoiTra.MaHoanDoiTra = HoanDoiTra.MaHoanDoiTra) as SoSanPham,
-        ROW_NUMBER() OVER (ORDER BY HoanDoiTra.NgayYeuCau DESC) as RowNum
-      FROM HoanDoiTra
-      LEFT JOIN HoaDon ON HoanDoiTra.MaHoaDon = HoaDon.MaHoaDon
-      LEFT JOIN KhachHang ON HoanDoiTra.MaKhachHang = KhachHang.MaKhachHang
-      LEFT JOIN NhanVien ON HoanDoiTra.NguoiXuLy = NhanVien.MaNhanVien
-      WHERE 1=1
-    `;
-    const params: any = {};
-    
-    // Search by invoice code, customer name, product
+    const params: any = { offset, limit: Number(limit) };
+
+    let where = 'WHERE 1=1';
     if (search) {
-      sqlQuery += ` AND (
-        CAST(HoaDon.MaHoaDon AS NVARCHAR) LIKE @search 
-        OR KhachHang.HoTen LIKE @search 
-        OR KhachHang.SoDienThoai LIKE @search
+      where += ` AND (
+        'RT'+RIGHT('0000'+CAST(HDT.MaHoanDoiTra AS NVARCHAR),4) LIKE @search
+        OR CAST(HDT.MaHoaDon AS NVARCHAR) LIKE @search
+        OR KH.HoTen LIKE @search
+        OR SP.TenSanPham LIKE @search
       )`;
       params.search = `%${search}%`;
     }
-    
-    // Filter by request type
-    if (type) {
-      sqlQuery += ' AND HoanDoiTra.LoaiYeuCau = @type';
-      params.type = type;
-    }
-    
-    // Filter by status
-    if (status) {
-      sqlQuery += ' AND HoanDoiTra.TrangThai = @status';
-      params.status = status;
-    }
-    
-    // Filter by date range
-    if (startDate) {
-      sqlQuery += ' AND HoanDoiTra.NgayYeuCau >= @startDate';
-      params.startDate = startDate;
-    }
-    if (endDate) {
-      sqlQuery += ' AND HoanDoiTra.NgayYeuCau <= @endDate';
-      params.endDate = endDate;
-    }
-    
-    const countSql = `SELECT COUNT(*) as total FROM (${sqlQuery}) as counted`;
-    const total = await queryOne(countSql, params);
-    
-    sqlQuery = `
-      SELECT * FROM (${sqlQuery}) as temp
-      WHERE RowNum > @offset AND RowNum <= @offsetLimit
-      ORDER BY RowNum
-    `;
-    params.offset = offset;
-    params.offsetLimit = offset + Number(limit);
-    
-    const data = await query(sqlQuery, params);
-    
-    res.json({
-      success: true,
-      data,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total: total.total,
-        totalPages: Math.ceil(total.total / Number(limit))
-      }
-    });
+    if (loai)   { where += ' AND HDT.LoaiYeuCau = @loai';   params.loai = loai; }
+    if (status) { where += ' AND HDT.TrangThai  = @status'; params.status = status; }
+    if (tuNgay) { where += ' AND HDT.NgayYeuCau >= @tuNgay'; params.tuNgay = new Date(tuNgay as string); }
+    if (denNgay){ where += ' AND HDT.NgayYeuCau <= @denNgay'; params.denNgay = new Date(denNgay as string); }
+
+    const data = await query(`
+      SELECT
+        HDT.MaHoanDoiTra,
+        'RT'+RIGHT('0000'+CAST(HDT.MaHoanDoiTra AS NVARCHAR),4) AS MaYeuCau,
+        'HD'+RIGHT('0000'+CAST(HDT.MaHoaDon     AS NVARCHAR),4) AS MaHoaDonHienThi,
+        HDT.MaHoaDon,
+        HDT.MaKhachHang,
+        KH.HoTen        AS TenKhachHang,
+        KH.SoDienThoai,
+        KH.Email,
+        HDT.LoaiYeuCau,
+        HDT.LyDo,
+        HDT.MoTaChiTiet,
+        HDT.TrangThai,
+        HDT.NgayYeuCau,
+        HDT.NgayXuLy,
+        HDT.SoTienHoan,
+        HDT.NhapLaiKho,
+        HDT.LyDoTuChoi,
+        NV.HoTen        AS TenNguoiXuLy,
+        NVD.HoTen       AS TenNguoiDuyet,
+        (SELECT TOP 1 SP2.TenSanPham
+           FROM ChiTietHoanDoiTra CT2
+           JOIN SanPham SP2 ON CT2.MaSanPham=SP2.MaSanPham
+          WHERE CT2.MaHoanDoiTra=HDT.MaHoanDoiTra) AS TenSanPhamDau,
+        (SELECT COUNT(*) FROM ChiTietHoanDoiTra WHERE MaHoanDoiTra=HDT.MaHoanDoiTra) AS SoSanPham
+      FROM HoanDoiTra HDT
+      LEFT JOIN KhachHang  KH  ON HDT.MaKhachHang = KH.MaKhachHang
+      LEFT JOIN NhanVien   NV  ON HDT.NguoiXuLy   = NV.MaNhanVien
+      LEFT JOIN TaiKhoan   NVD ON HDT.NguoiDuyet  = NVD.MaTaiKhoan
+      LEFT JOIN ChiTietHoanDoiTra CT ON CT.MaHoanDoiTra = HDT.MaHoanDoiTra
+      LEFT JOIN SanPham SP ON CT.MaSanPham = SP.MaSanPham
+      ${where}
+      GROUP BY
+        HDT.MaHoanDoiTra, HDT.MaHoaDon, HDT.MaKhachHang,
+        KH.HoTen, KH.SoDienThoai, KH.Email,
+        HDT.LoaiYeuCau, HDT.LyDo, HDT.MoTaChiTiet, HDT.TrangThai,
+        HDT.NgayYeuCau, HDT.NgayXuLy, HDT.SoTienHoan,
+        HDT.NhapLaiKho, HDT.LyDoTuChoi,
+        NV.HoTen, NVD.HoTen
+      ORDER BY HDT.NgayYeuCau DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `, params);
+
+    const cnt = await queryOne<{ total: number }>(
+      `SELECT COUNT(DISTINCT HDT.MaHoanDoiTra) as total
+       FROM HoanDoiTra HDT
+       LEFT JOIN KhachHang KH ON HDT.MaKhachHang=KH.MaKhachHang
+       LEFT JOIN ChiTietHoanDoiTra CT ON CT.MaHoanDoiTra=HDT.MaHoanDoiTra
+       LEFT JOIN SanPham SP ON CT.MaSanPham=SP.MaSanPham
+       ${where}`, params
+    ) || { total: 0 };
+
+    res.json({ success: true, data, pagination: { page: Number(page), limit: Number(limit), total: cnt.total, totalPages: Math.ceil(cnt.total / Number(limit)) } });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// GET return request by ID with details
-router.get('/:id', async (req, res) => {
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /api/hoandoitra/statistics
+// ══════════════════════════════════════════════════════════════════════════════
+router.get('/statistics', async (_req, res) => {
   try {
-    const returnRequest: any = await queryOne(`
-      SELECT 
-        HoanDoiTra.*,
-        HoaDon.NgayLap,
-        KhachHang.HoTen as TenKhachHang,
-        KhachHang.SoDienThoai,
-        KhachHang.DiaChi,
-        NhanVien.HoTen as TenNguoiXuLy
+    const stats = await queryOne<any>(`
+      SELECT
+        SUM(CASE WHEN TrangThai IN (N'Cho xu ly','Chờ xử lý') THEN 1 ELSE 0 END)      AS choXuLy,
+        SUM(CASE WHEN TrangThai IN (N'Tiep nhan','Đang tiếp nhận','Đang xử lý') THEN 1 ELSE 0 END) AS tiepNhan,
+        SUM(CASE WHEN TrangThai IN (N'Kiem tra','Đang kiểm tra') THEN 1 ELSE 0 END)   AS kiemTra,
+        SUM(CASE WHEN TrangThai IN (N'Cho duyet','Chờ Admin duyệt') THEN 1 ELSE 0 END) AS choDuyet,
+        SUM(CASE WHEN TrangThai IN (N'Da duyet','Đã duyệt') THEN 1 ELSE 0 END)        AS daDuyet,
+        SUM(CASE WHEN TrangThai IN (N'Tu choi','Từ chối') THEN 1 ELSE 0 END)          AS tuChoi,
+        SUM(CASE WHEN TrangThai IN (N'Hoan tien','Đã hoàn tiền') THEN 1 ELSE 0 END)   AS hoanTien,
+        SUM(CASE WHEN TrangThai IN (N'Hoan tat','Hoàn tất') THEN 1 ELSE 0 END)        AS hoanTat,
+        COUNT(*) AS tongYeuCau,
+        ISNULL(SUM(CASE WHEN TrangThai IN (N'Hoan tien','Hoan tat') THEN SoTienHoan ELSE 0 END),0) AS tongTienHoan
       FROM HoanDoiTra
-      LEFT JOIN HoaDon ON HoanDoiTra.MaHoaDon = HoaDon.MaHoaDon
-      LEFT JOIN KhachHang ON HoanDoiTra.MaKhachHang = KhachHang.MaKhachHang
-      LEFT JOIN NhanVien ON HoanDoiTra.NguoiXuLy = NhanVien.MaNhanVien
-      WHERE HoanDoiTra.MaHoanDoiTra = @id
-    `, { id: Number(req.params.id) });
-    
-    if (!returnRequest) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy yêu cầu hoàn/đổi trả' });
-    }
-    
-    // Get return request details
-    const chiTiet = await query(`
-      SELECT 
-        ChiTietHoanDoiTra.*,
-        SanPham.TenSanPham,
-        SanPham.SoLuong as SoLuongTonKho
-      FROM ChiTietHoanDoiTra
-      LEFT JOIN SanPham ON ChiTietHoanDoiTra.MaSanPham = SanPham.MaSanPham
-      WHERE ChiTietHoanDoiTra.MaHoanDoiTra = @id
-    `, { id: Number(req.params.id) });
-    
-    res.json({
-      success: true,
-      data: {
-        ...returnRequest,
-        chiTiet
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// POST create return request
-router.post('/', async (req, res) => {
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-  
-  try {
-    await transaction.begin();
-    
-    const { 
-      MaHoaDon, 
-      MaKhachHang, 
-      LoaiYeuCau, 
-      LyDo, 
-      MoTaChiTiet, 
-      ChiTiet 
-    } = req.body;
-    
-    // Validate required fields
-    if (!MaHoaDon || !MaKhachHang || !LoaiYeuCau || !ChiTiet || ChiTiet.length === 0) {
-      await transaction.rollback();
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Vui lòng nhập đầy đủ thông tin bắt buộc' 
-      });
-    }
-    
-    // Validate request type
-    if (!['Đổi hàng', 'Trả hàng'].includes(LoaiYeuCau)) {
-      await transaction.rollback();
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Loại yêu cầu không hợp lệ' 
-      });
-    }
-    
-    // Create return request
-    const requestReq = new sql.Request(transaction);
-    requestReq.input('MaHoaDon', sql.Int, MaHoaDon);
-    requestReq.input('MaKhachHang', sql.Int, MaKhachHang);
-    requestReq.input('LoaiYeuCau', sql.NVarChar, LoaiYeuCau);
-    requestReq.input('LyDo', sql.NVarChar, LyDo || null);
-    requestReq.input('MoTaChiTiet', sql.NVarChar, MoTaChiTiet || null);
-    
-    const requestResult = await requestReq.query(`
-      INSERT INTO HoanDoiTra (
-        MaHoaDon, MaKhachHang, LoaiYeuCau, LyDo, MoTaChiTiet, TrangThai
-      )
-      OUTPUT INSERTED.MaHoanDoiTra
-      VALUES (
-        @MaHoaDon, @MaKhachHang, @LoaiYeuCau, @LyDo, @MoTaChiTiet, N'Chờ xử lý'
-      )
-    `);
-    
-    const maHoanDoiTra = requestResult.recordset[0].MaHoanDoiTra;
-    
-    // Insert return request details
-    let tongTien = 0;
-    for (const item of ChiTiet) {
-      // Verify product exists in invoice
-      const invoiceDetailReq = new sql.Request(transaction);
-      invoiceDetailReq.input('MaHoaDon', sql.Int, MaHoaDon);
-      invoiceDetailReq.input('MaSanPham', sql.Int, item.MaSanPham);
-      
-      const invoiceDetail = await invoiceDetailReq.query(`
-        SELECT SoLuong, DonGia 
-        FROM ChiTietHoaDon 
-        WHERE MaHoaDon = @MaHoaDon AND MaSanPham = @MaSanPham
-      `);
-      
-      if (invoiceDetail.recordset.length === 0) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          success: false, 
-          message: `Sản phẩm không tồn tại trong hóa đơn` 
-        });
-      }
-      
-      const maxQuantity = invoiceDetail.recordset[0].SoLuong;
-      const donGia = invoiceDetail.recordset[0].DonGia;
-      
-      if (item.SoLuong > maxQuantity) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          success: false, 
-          message: `Số lượng vượt quá số lượng trong hóa đơn` 
-        });
-      }
-      
-      const thanhTien = item.SoLuong * donGia;
-      tongTien += thanhTien;
-      
-      const detailReq = new sql.Request(transaction);
-      detailReq.input('MaHoanDoiTra', sql.Int, maHoanDoiTra);
-      detailReq.input('MaSanPham', sql.Int, item.MaSanPham);
-      detailReq.input('SoLuong', sql.Int, item.SoLuong);
-      detailReq.input('DonGia', sql.Decimal(18, 2), donGia);
-      detailReq.input('ThanhTien', sql.Decimal(18, 2), thanhTien);
-      detailReq.input('TrangThaiSanPham', sql.NVarChar, item.TrangThaiSanPham || null);
-      
-      await detailReq.query(`
-        INSERT INTO ChiTietHoanDoiTra (
-          MaHoanDoiTra, MaSanPham, SoLuong, DonGia, ThanhTien, TrangThaiSanPham
-        )
-        VALUES (
-          @MaHoanDoiTra, @MaSanPham, @SoLuong, @DonGia, @ThanhTien, @TrangThaiSanPham
-        )
-      `);
-    }
-    
-    // Update total refund amount
-    const updateReq = new sql.Request(transaction);
-    updateReq.input('MaHoanDoiTra', sql.Int, maHoanDoiTra);
-    updateReq.input('SoTienHoan', sql.Decimal(18, 2), tongTien);
-    await updateReq.query('UPDATE HoanDoiTra SET SoTienHoan = @SoTienHoan WHERE MaHoanDoiTra = @MaHoanDoiTra');
-    
-    await transaction.commit();
-    
-    res.status(201).json({
-      success: true,
-      message: 'Tạo yêu cầu hoàn/đổi trả thành công',
-      data: { MaHoanDoiTra: maHoanDoiTra }
-    });
-  } catch (err: any) {
-    await transaction.rollback();
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// PUT approve return request
-router.put('/:id/approve', async (req, res) => {
-  try {
-    const { NguoiXuLy, GhiChuNguoiXuLy } = req.body;
-    
-    const result = await execute(`
-      UPDATE HoanDoiTra
-      SET 
-        TrangThai = N'Đã duyệt',
-        NgayXuLy = GETDATE(),
-        NguoiXuLy = @NguoiXuLy,
-        GhiChuNguoiXuLy = @GhiChuNguoiXuLy,
-        NgayCapNhat = GETDATE()
-      WHERE MaHoanDoiTra = @id AND TrangThai = N'Chờ xử lý'
-    `, {
-      id: Number(req.params.id),
-      NguoiXuLy: NguoiXuLy || null,
-      GhiChuNguoiXuLy: GhiChuNguoiXuLy || null
-    });
-    
-    if (result.rowsAffected[0] === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Không thể duyệt yêu cầu này' 
-      });
-    }
-    
-    res.json({ success: true, message: 'Duyệt yêu cầu thành công' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// PUT reject return request
-router.put('/:id/reject', async (req, res) => {
-  try {
-    const { NguoiXuLy, GhiChuNguoiXuLy } = req.body;
-    
-    const result = await execute(`
-      UPDATE HoanDoiTra
-      SET 
-        TrangThai = N'Từ chối',
-        NgayXuLy = GETDATE(),
-        NguoiXuLy = @NguoiXuLy,
-        GhiChuNguoiXuLy = @GhiChuNguoiXuLy,
-        NgayCapNhat = GETDATE()
-      WHERE MaHoanDoiTra = @id AND TrangThai = N'Chờ xử lý'
-    `, {
-      id: Number(req.params.id),
-      NguoiXuLy: NguoiXuLy || null,
-      GhiChuNguoiXuLy: GhiChuNguoiXuLy || null
-    });
-    
-    if (result.rowsAffected[0] === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Không thể từ chối yêu cầu này' 
-      });
-    }
-    
-    res.json({ success: true, message: 'Từ chối yêu cầu thành công' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// PUT complete return request (update inventory)
-router.put('/:id/complete', async (req, res) => {
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-  
-  try {
-    await transaction.begin();
-    
-    // Get return request info
-    const requestReq = new sql.Request(transaction);
-    requestReq.input('id', sql.Int, Number(req.params.id));
-    const requestResult = await requestReq.query(`
-      SELECT * FROM HoanDoiTra WHERE MaHoanDoiTra = @id AND TrangThai = N'Đã duyệt'
-    `);
-    
-    if (requestResult.recordset.length === 0) {
-      await transaction.rollback();
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Yêu cầu chưa được duyệt hoặc không tồn tại' 
-      });
-    }
-    
-    const returnRequest = requestResult.recordset[0];
-    
-    // Get return details
-    const detailsReq = new sql.Request(transaction);
-    detailsReq.input('id', sql.Int, Number(req.params.id));
-    const detailsResult = await detailsReq.query(`
-      SELECT * FROM ChiTietHoanDoiTra WHERE MaHoanDoiTra = @id
-    `);
-    
-    // Update inventory based on request type
-    for (const detail of detailsResult.recordset) {
-      if (returnRequest.LoaiYeuCau === 'Trả hàng') {
-        // Return: add quantity back to inventory
-        const stockReq = new sql.Request(transaction);
-        stockReq.input('SoLuong', sql.Int, detail.SoLuong);
-        stockReq.input('MaSanPham', sql.Int, detail.MaSanPham);
-        await stockReq.query('UPDATE SanPham SET SoLuong = SoLuong + @SoLuong WHERE MaSanPham = @MaSanPham');
-      }
-      // For 'Đổi hàng', inventory is handled separately when new product is issued
-    }
-    
-    // Update return request status
-    const updateReq = new sql.Request(transaction);
-    updateReq.input('id', sql.Int, Number(req.params.id));
-    await updateReq.query(`
-      UPDATE HoanDoiTra 
-      SET TrangThai = N'Hoàn tất', NgayCapNhat = GETDATE() 
-      WHERE MaHoanDoiTra = @id
-    `);
-    
-    await transaction.commit();
-    
-    res.json({ 
-      success: true, 
-      message: 'Hoàn tất xử lý yêu cầu và cập nhật tồn kho thành công' 
-    });
-  } catch (err: any) {
-    await transaction.rollback();
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// DELETE return request
-router.delete('/:id', async (req, res) => {
-  try {
-    const result = await execute(
-      'DELETE FROM HoanDoiTra WHERE MaHoanDoiTra = @id AND TrangThai = N\'Chờ xử lý\'', 
-      { id: Number(req.params.id) }
-    );
-    
-    if (result.rowsAffected[0] === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Không thể xóa yêu cầu đã được xử lý' 
-      });
-    }
-    
-    res.json({ success: true, message: 'Xóa yêu cầu hoàn/đổi trả thành công' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// GET return statistics
-router.get('/stats/summary', async (req, res) => {
-  try {
-    const stats = await queryOne(`
-      SELECT 
-        COUNT(*) as TongYeuCau,
-        SUM(CASE WHEN TrangThai = N'Chờ xử lý' THEN 1 ELSE 0 END) as ChoXuLy,
-        SUM(CASE WHEN TrangThai = N'Đã duyệt' THEN 1 ELSE 0 END) as DaDuyet,
-        SUM(CASE WHEN TrangThai = N'Hoàn tất' THEN 1 ELSE 0 END) as HoanTat,
-        SUM(CASE WHEN TrangThai = N'Từ chối' THEN 1 ELSE 0 END) as TuChoi,
-        SUM(CASE WHEN LoaiYeuCau = N'Trả hàng' THEN 1 ELSE 0 END) as TraHang,
-        SUM(CASE WHEN LoaiYeuCau = N'Đổi hàng' THEN 1 ELSE 0 END) as DoiHang,
-        SUM(SoTienHoan) as TongTienHoan
-      FROM HoanDoiTra
-    `);
-    
+    `, {}) || {};
     res.json({ success: true, data: stats });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// GET products from a specific invoice (for return form)
-router.get('/invoice/:invoiceId/products', async (req, res) => {
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /api/hoandoitra/:id  — chi tiết đầy đủ
+// ══════════════════════════════════════════════════════════════════════════════
+router.get('/:id', async (req, res) => {
   try {
-    const products = await query(`
-      SELECT 
-        ChiTietHoaDon.*,
-        SanPham.TenSanPham
-      FROM ChiTietHoaDon
-      LEFT JOIN SanPham ON ChiTietHoaDon.MaSanPham = SanPham.MaSanPham
-      WHERE ChiTietHoaDon.MaHoaDon = @invoiceId
-    `, { invoiceId: Number(req.params.invoiceId) });
-    
-    res.json({ success: true, data: products });
+    const id = parseInt(req.params.id);
+
+    const detail = await queryOne<any>(`
+      SELECT
+        HDT.*,
+        'RT'+RIGHT('0000'+CAST(HDT.MaHoanDoiTra AS NVARCHAR),4) AS MaYeuCau,
+        'HD'+RIGHT('0000'+CAST(HDT.MaHoaDon     AS NVARCHAR),4) AS MaHoaDonHienThi,
+        KH.HoTen       AS TenKhachHang,
+        KH.SoDienThoai AS SoDienThoaiKH,
+        KH.Email       AS EmailKH,
+        KH.DiaChi      AS DiaChiKH,
+        NV.HoTen       AS TenNguoiXuLy,
+        TKD.TenDangNhap AS TenNguoiDuyet,
+        HD.NgayLap,
+        HD.PhuongThucThanhToan,
+        ISNULL((SELECT SUM(ThanhTien) FROM ChiTietHoaDon WHERE MaHoaDon=HD.MaHoaDon),0) AS TongTienDonHang
+      FROM HoanDoiTra HDT
+      LEFT JOIN KhachHang KH  ON HDT.MaKhachHang = KH.MaKhachHang
+      LEFT JOIN NhanVien  NV  ON HDT.NguoiXuLy   = NV.MaNhanVien
+      LEFT JOIN TaiKhoan  TKD ON HDT.NguoiDuyet  = TKD.MaTaiKhoan
+      LEFT JOIN HoaDon    HD  ON HDT.MaHoaDon    = HD.MaHoaDon
+      WHERE HDT.MaHoanDoiTra = @id
+    `, { id });
+
+    if (!detail) return res.status(404).json({ success: false, message: 'Không tìm thấy yêu cầu hoàn trả' });
+
+    // Chi tiết sản phẩm
+    const chiTiet = await query(`
+      SELECT
+        CT.MaChiTiet, CT.MaSanPham, CT.SoLuong, CT.DonGia, CT.ThanhTien, CT.TrangThaiSanPham,
+        SP.TenSanPham, SP.HinhAnh, SP.SoLuong AS TonKhoHienTai
+      FROM ChiTietHoanDoiTra CT
+      LEFT JOIN SanPham SP ON CT.MaSanPham = SP.MaSanPham
+      WHERE CT.MaHoanDoiTra = @id
+    `, { id });
+
+    // Bằng chứng
+    const bangChung = await query(`SELECT * FROM BangChungHoanTra WHERE MaHoanDoiTra=@id ORDER BY NgayTao`, { id });
+
+    // Kết quả kiểm tra
+    const kiemTra = await queryOne<any>(`
+      SELECT KT.*, NV.HoTen AS TenNguoiKiemTra
+      FROM KiemTraHoanTra KT
+      LEFT JOIN NhanVien NV ON KT.NguoiKiemTra=NV.MaNhanVien
+      WHERE KT.MaHoanDoiTra=@id
+      ORDER BY KT.NgayKiemTra DESC
+    `, { id });
+
+    // Thông tin hoàn tiền
+    const hoanTien = await queryOne<any>(`
+      SELECT HT.*, TK.TenDangNhap AS TenNguoiThucHien
+      FROM HoanTien HT
+      LEFT JOIN TaiKhoan TK ON HT.NguoiThucHien=TK.MaTaiKhoan
+      WHERE HT.MaHoanDoiTra=@id
+    `, { id });
+
+    // Timeline
+    const timeline = await query(`
+      SELECT
+        LS.MaLichSu, LS.TrangThaiCu, LS.TrangThaiMoi, LS.GhiChu, LS.NgayThayDoi,
+        COALESCE(NV.HoTen, TK.TenDangNhap, N'Hệ thống') AS NguoiThayDoi
+      FROM LichSuTrangThaiHoanTra LS
+      LEFT JOIN NhanVien NV ON LS.NguoiThayDoi=NV.MaTaiKhoan
+      LEFT JOIN TaiKhoan TK ON LS.NguoiThayDoi=TK.MaTaiKhoan
+      WHERE LS.MaHoanDoiTra=@id
+      ORDER BY LS.NgayThayDoi ASC
+    `, { id });
+
+    res.json({ success: true, data: { ...detail, chiTiet, bangChung, kiemTra, hoanTien, timeline } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POST /:id/receive  — Tiếp nhận (Admin + NV)
+// ══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/receive', async (req: AuthRequest, res) => {
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const id = parseInt(req.params.id);
+    const userId = req.user!.MaTaiKhoan;
+
+    await tx.begin();
+    const r = new sql.Request(tx);
+    r.input('id', sql.Int, id);
+    const cur = await r.query(`SELECT TrangThai FROM HoanDoiTra WHERE MaHoanDoiTra=@id`);
+    if (!cur.recordset[0]) throw new Error('Không tìm thấy yêu cầu');
+    const oldStatus = cur.recordset[0].TrangThai;
+
+    const r2 = new sql.Request(tx);
+    r2.input('id', sql.Int, id);
+    r2.input('uid', sql.Int, userId);
+    await r2.query(`UPDATE HoanDoiTra SET TrangThai=N'Tiep nhan', NguoiXuLy=@uid WHERE MaHoanDoiTra=@id`);
+    await logHistory(tx, id, oldStatus, 'Tiep nhan', userId, 'Tiếp nhận yêu cầu');
+
+    await tx.commit();
+    res.json({ success: true, message: 'Đã tiếp nhận yêu cầu' });
+  } catch (err: any) { await tx.rollback(); res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POST /:id/inspect  — Nhập kết quả kiểm tra (Admin + NV)
+// ══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/inspect', async (req: AuthRequest, res) => {
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const id = parseInt(req.params.id);
+    const { TinhTrangSP, KetQua, GhiChu } = req.body;
+    const userId = req.user!.MaTaiKhoan;
+
+    await tx.begin();
+
+    // Lấy MaNhanVien từ TaiKhoan
+    const nvReq = new sql.Request(tx);
+    nvReq.input('uid', sql.Int, userId);
+    const nvResult = await nvReq.query(`SELECT MaNhanVien FROM NhanVien WHERE MaTaiKhoan=@uid`);
+    const maNV = nvResult.recordset[0]?.MaNhanVien || null;
+
+    const r = new sql.Request(tx);
+    r.input('id',    sql.Int,          id);
+    r.input('nv',    sql.Int,          maNV);
+    r.input('tt',    sql.NVarChar(100), TinhTrangSP || null);
+    r.input('kq',    sql.NVarChar(50),  KetQua || null);
+    r.input('gc',    sql.NVarChar(500), GhiChu || null);
+    // Upsert inspection
+    await r.query(`
+      IF EXISTS (SELECT 1 FROM KiemTraHoanTra WHERE MaHoanDoiTra=@id)
+        UPDATE KiemTraHoanTra SET TinhTrangSP=@tt, KetQua=@kq, GhiChu=@gc, NgayKiemTra=GETDATE()
+        WHERE MaHoanDoiTra=@id
+      ELSE
+        INSERT INTO KiemTraHoanTra (MaHoanDoiTra, NguoiKiemTra, TinhTrangSP, KetQua, GhiChu)
+        VALUES (@id, @nv, @tt, @kq, @gc)
+    `);
+
+    const r2 = new sql.Request(tx);
+    r2.input('id', sql.Int, id);
+    const cur = await r2.query(`SELECT TrangThai FROM HoanDoiTra WHERE MaHoanDoiTra=@id`);
+    const oldStatus = cur.recordset[0].TrangThai;
+
+    const r3 = new sql.Request(tx);
+    r3.input('id', sql.Int, id);
+    await r3.query(`UPDATE HoanDoiTra SET TrangThai=N'Cho duyet', NgayCapNhat=GETDATE() WHERE MaHoanDoiTra=@id`);
+    await logHistory(tx, id, oldStatus, 'Cho duyet', userId, GhiChu || 'Hoàn thành kiểm tra, chuyển Admin duyệt');
+
+    await tx.commit();
+    res.json({ success: true, message: 'Đã lưu kết quả kiểm tra' });
+  } catch (err: any) { await tx.rollback(); res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POST /:id/approve  — Admin duyệt
+// ══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/approve', async (req: AuthRequest, res) => {
+  if (req.user?.VaiTro !== 'Admin') return res.status(403).json({ success: false, message: 'Chỉ Admin mới duyệt được' });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const id = parseInt(req.params.id);
+    const { NhapLaiKho, SoTienHoan, PhuongThucHoan, GhiChu } = req.body;
+    const userId = req.user!.MaTaiKhoan;
+
+    await tx.begin();
+    const r = new sql.Request(tx);
+    r.input('id', sql.Int, id);
+    const cur = await r.query(`SELECT TrangThai, MaKhachHang FROM HoanDoiTra WHERE MaHoanDoiTra=@id`);
+    const row = cur.recordset[0];
+    if (!row) throw new Error('Không tìm thấy yêu cầu');
+    if (!['Cho duyet', 'Cho xu ly', 'Chờ xử lý', 'Chờ Admin duyệt'].includes(row.TrangThai))
+      throw new Error('Yêu cầu không ở trạng thái chờ duyệt');
+
+    const r2 = new sql.Request(tx);
+    r2.input('id',     sql.Int,          id);
+    r2.input('uid',    sql.Int,          userId);
+    r2.input('slk',    sql.Bit,          NhapLaiKho ? 1 : 0);
+    r2.input('st',     sql.Decimal(18,2), SoTienHoan || null);
+    r2.input('pth',    sql.NVarChar(100), PhuongThucHoan || null);
+    await r2.query(`
+      UPDATE HoanDoiTra
+      SET TrangThai=N'Da duyet', NguoiDuyet=@uid, NgayDuyet=GETDATE(),
+          NhapLaiKho=@slk, SoTienHoan=@st, PhuongThucHoan=@pth, NgayCapNhat=GETDATE()
+      WHERE MaHoanDoiTra=@id
+    `);
+    await logHistory(tx, id, row.TrangThai, 'Da duyet', userId, GhiChu || 'Admin phê duyệt yêu cầu hoàn trả');
+
+    await tx.commit();
+    res.json({ success: true, message: 'Đã duyệt yêu cầu hoàn trả' });
+  } catch (err: any) { await tx.rollback(); res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POST /:id/reject  — Admin từ chối
+// ══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/reject', async (req: AuthRequest, res) => {
+  if (req.user?.VaiTro !== 'Admin') return res.status(403).json({ success: false, message: 'Chỉ Admin mới từ chối được' });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const id = parseInt(req.params.id);
+    const { LyDoTuChoi } = req.body;
+    if (!LyDoTuChoi?.trim()) throw new Error('Vui lòng nhập lý do từ chối');
+    const userId = req.user!.MaTaiKhoan;
+
+    await tx.begin();
+    const r = new sql.Request(tx);
+    r.input('id', sql.Int, id);
+    const cur = await r.query(`SELECT TrangThai FROM HoanDoiTra WHERE MaHoanDoiTra=@id`);
+    const oldStatus = cur.recordset[0]?.TrangThai;
+
+    const r2 = new sql.Request(tx);
+    r2.input('id',  sql.Int,          id);
+    r2.input('uid', sql.Int,          userId);
+    r2.input('ly',  sql.NVarChar(500), LyDoTuChoi);
+    await r2.query(`
+      UPDATE HoanDoiTra
+      SET TrangThai=N'Tu choi', NguoiDuyet=@uid, NgayDuyet=GETDATE(),
+          LyDoTuChoi=@ly, NgayCapNhat=GETDATE()
+      WHERE MaHoanDoiTra=@id
+    `);
+    await logHistory(tx, id, oldStatus, 'Tu choi', userId, LyDoTuChoi);
+
+    await tx.commit();
+    res.json({ success: true, message: 'Đã từ chối yêu cầu' });
+  } catch (err: any) { await tx.rollback(); res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// POST /:id/refund  — Admin thực hiện hoàn tiền (transaction đầy đủ)
+// ══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/refund', async (req: AuthRequest, res) => {
+  if (req.user?.VaiTro !== 'Admin') return res.status(403).json({ success: false, message: 'Chỉ Admin mới hoàn tiền được' });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const id = parseInt(req.params.id);
+    const { PhuongThucHoan, TenTaiKhoan, SoTaiKhoan, NganHang, GhiChu } = req.body;
+    const userId = req.user!.MaTaiKhoan;
+
+    await tx.begin();
+
+    // 1. Kiểm tra trạng thái
+    const r = new sql.Request(tx);
+    r.input('id', sql.Int, id);
+    const cur = await r.query(`
+      SELECT HDT.TrangThai, HDT.SoTienHoan, HDT.NhapLaiKho, HDT.MaHoaDon
+      FROM HoanDoiTra HDT
+      WHERE MaHoanDoiTra=@id
+    `);
+    const row = cur.recordset[0];
+    if (!row) throw new Error('Không tìm thấy yêu cầu');
+    if (!['Da duyet', 'Đã duyệt'].includes(row.TrangThai))
+      throw new Error('Yêu cầu chưa được duyệt');
+
+    // 2. Kiểm tra chưa hoàn tiền
+    const r2 = new sql.Request(tx);
+    r2.input('id', sql.Int, id);
+    const existRefund = await r2.query(`SELECT MaHoanTien FROM HoanTien WHERE MaHoanDoiTra=@id`);
+    if (existRefund.recordset.length > 0) throw new Error('Yêu cầu này đã được hoàn tiền rồi');
+
+    // 3. Tạo bản ghi hoàn tiền
+    const maGD = `REF${Date.now()}`;
+    const r3 = new sql.Request(tx);
+    r3.input('id',   sql.Int,          id);
+    r3.input('mgd',  sql.NVarChar(100), maGD);
+    r3.input('st',   sql.Decimal(18,2), row.SoTienHoan || 0);
+    r3.input('pth',  sql.NVarChar(100), PhuongThucHoan || 'chuyen_khoan');
+    r3.input('ttk',  sql.NVarChar(200), TenTaiKhoan || null);
+    r3.input('stk',  sql.NVarChar(50),  SoTaiKhoan  || null);
+    r3.input('nh',   sql.NVarChar(200), NganHang    || null);
+    r3.input('uid',  sql.Int,          userId);
+    r3.input('gc',   sql.NVarChar(500), GhiChu      || null);
+    await r3.query(`
+      INSERT INTO HoanTien (MaHoanDoiTra, MaGiaoDich, SoTienHoan, PhuongThucHoan,
+                            TenTaiKhoan, SoTaiKhoan, NganHang, NguoiThucHien, GhiChu)
+      VALUES (@id, @mgd, @st, @pth, @ttk, @stk, @nh, @uid, @gc)
+    `);
+
+    // 4. Cập nhật trạng thái → Hoan tien
+    const r4 = new sql.Request(tx);
+    r4.input('id', sql.Int, id);
+    await r4.query(`UPDATE HoanDoiTra SET TrangThai=N'Hoan tien', NgayCapNhat=GETDATE() WHERE MaHoanDoiTra=@id`);
+    await logHistory(tx, id, row.TrangThai, 'Hoan tien', userId, `Hoàn tiền qua ${PhuongThucHoan || 'chuyển khoản'}`);
+
+    // 5. Nếu NhapLaiKho = true → tăng tồn kho + ghi LichSuKho
+    if (row.NhapLaiKho) {
+      const chiTietReq = new sql.Request(tx);
+      chiTietReq.input('id', sql.Int, id);
+      const ctResult = await chiTietReq.query(`SELECT MaSanPham, SoLuong FROM ChiTietHoanDoiTra WHERE MaHoanDoiTra=@id`);
+
+      for (const ct of ctResult.recordset) {
+        // Kiểm tra đã tạo StockTransaction RETURN chưa
+        const checkReq = new sql.Request(tx);
+        checkReq.input('sp',  sql.Int,         ct.MaSanPham);
+        checkReq.input('ref', sql.Int,         id);
+        const existed = await checkReq.query(`
+          SELECT MaGiaoDich FROM LichSuKho
+          WHERE MaSanPham=@sp AND LoaiGiaoDich='RETURN' AND LoaiThamChieu='HoanDoiTra' AND MaThamChieu=@ref
+        `);
+        if (existed.recordset.length > 0) continue; // Chống cộng kho 2 lần
+
+        const spReq = new sql.Request(tx);
+        spReq.input('sp', sql.Int, ct.MaSanPham);
+        const spResult = await spReq.query(`SELECT SoLuong FROM SanPham WHERE MaSanPham=@sp`);
+        const soLuongTruoc = spResult.recordset[0]?.SoLuong || 0;
+        const soLuongSau   = soLuongTruoc + ct.SoLuong;
+
+        const upReq = new sql.Request(tx);
+        upReq.input('sl', sql.Int, soLuongSau);
+        upReq.input('sp', sql.Int, ct.MaSanPham);
+        await upReq.query(`UPDATE SanPham SET SoLuong=@sl WHERE MaSanPham=@sp`);
+
+        const lskReq = new sql.Request(tx);
+        lskReq.input('sp',   sql.Int,          ct.MaSanPham);
+        lskReq.input('loai', sql.NVarChar(20),  'RETURN');
+        lskReq.input('sl',   sql.Int,           ct.SoLuong);
+        lskReq.input('tr',   sql.Int,           soLuongTruoc);
+        lskReq.input('sau',  sql.Int,           soLuongSau);
+        lskReq.input('ref',  sql.Int,           id);
+        lskReq.input('gc',   sql.NVarChar(500),  `Hoàn trả từ yêu cầu RT${String(id).padStart(4,'0')}`);
+        lskReq.input('uid',  sql.Int,           userId);
+        await lskReq.query(`
+          INSERT INTO LichSuKho (MaSanPham,LoaiGiaoDich,SoLuong,SoLuongTruoc,SoLuongSau,
+                                 LoaiThamChieu,MaThamChieu,GhiChu,NguoiThucHien)
+          VALUES (@sp,'RETURN',@sl,@tr,@sau,'HoanDoiTra',@ref,@gc,@uid)
+        `);
+      }
+
+      // Cập nhật trạng thái → Hoan tat
+      const r5 = new sql.Request(tx);
+      r5.input('id', sql.Int, id);
+      await r5.query(`UPDATE HoanDoiTra SET TrangThai=N'Hoan tat', NgayCapNhat=GETDATE() WHERE MaHoanDoiTra=@id`);
+      await logHistory(tx, id, 'Hoan tien', 'Hoan tat', userId, 'Nhập lại kho và hoàn tất');
+    }
+
+    await tx.commit();
+    res.json({ success: true, message: 'Hoàn tiền thành công', data: { MaGiaoDich: maGD } });
+  } catch (err: any) { await tx.rollback(); res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /api/hoandoitra/:id/order-products  — Sản phẩm của đơn hàng (để tạo yêu cầu)
+// ══════════════════════════════════════════════════════════════════════════════
+router.get('/:id/order-products', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const data = await query(`
+      SELECT CT.MaSanPham, SP.TenSanPham, SP.HinhAnh,
+             CT.SoLuong, CT.DonGia, CT.ThanhTien
+      FROM ChiTietHoaDon CT
+      LEFT JOIN SanPham SP ON CT.MaSanPham=SP.MaSanPham
+      WHERE CT.MaHoaDon=@id
+    `, { id });
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /api/hoandoitra/:id/history  — Timeline lịch sử
+// ══════════════════════════════════════════════════════════════════════════════
+router.get('/:id/history', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const data = await query(`
+      SELECT LS.*, COALESCE(NV.HoTen, TK.TenDangNhap, N'Hệ thống') AS NguoiThayDoi
+      FROM LichSuTrangThaiHoanTra LS
+      LEFT JOIN NhanVien  NV ON LS.NguoiThayDoi=NV.MaTaiKhoan
+      LEFT JOIN TaiKhoan  TK ON LS.NguoiThayDoi=TK.MaTaiKhoan
+      WHERE LS.MaHoanDoiTra=@id ORDER BY LS.NgayThayDoi ASC
+    `, { id });
+    res.json({ success: true, data });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

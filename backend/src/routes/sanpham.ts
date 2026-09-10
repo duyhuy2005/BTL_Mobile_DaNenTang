@@ -30,7 +30,7 @@ router.get('/', async (req, res) => {
     }
     
     const countSql = `SELECT COUNT(*) as total FROM (${sql}) as counted`;
-    const total = await queryOne(countSql, params);
+    const total = await queryOne<{ total: number }>(countSql, params) || { total: 0 };
     
     sql = `
       SELECT * FROM (${sql}) as temp
@@ -81,13 +81,53 @@ router.get('/:id', async (req, res) => {
 // POST create product
 router.post('/', async (req, res) => {
   try {
-    const { TenSanPham, MaDanhMuc, ThuongHieu, GiaNhap, GiaBan, SoLuong, MoTa, HinhAnh } = req.body;
+    const { 
+      TenSanPham, 
+      MaDanhMuc, 
+      ThuongHieu, 
+      GiaNhap, 
+      GiaBan, 
+      GiaKhuyenMai,
+      SoLuong, 
+      MoTa, 
+      ThanhPhan,
+      CongDung,
+      HuongDanSuDung,
+      HinhAnh,
+      TrangThai
+    } = req.body;
+
+    // Validate bắt buộc
+    if (!TenSanPham || !MaDanhMuc || GiaNhap === undefined || GiaBan === undefined || SoLuong === undefined) {
+      return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc: TenSanPham, MaDanhMuc, GiaNhap, GiaBan, SoLuong' });
+    }
     
+    // KHÔNG bao giờ insert MaSanPham — để SQL Server tự IDENTITY
     const result = await execute(`
-      INSERT INTO SanPham (TenSanPham, MaDanhMuc, ThuongHieu, GiaNhap, GiaBan, SoLuong, MoTa, HinhAnh)
+      INSERT INTO SanPham (
+        TenSanPham, MaDanhMuc, ThuongHieu, GiaNhap, GiaBan, GiaKhuyenMai, SoLuong, 
+        MoTa, ThanhPhan, CongDung, HuongDanSuDung, HinhAnh, TrangThai
+      )
       OUTPUT INSERTED.MaSanPham
-      VALUES (@TenSanPham, @MaDanhMuc, @ThuongHieu, @GiaNhap, @GiaBan, @SoLuong, @MoTa, @HinhAnh)
-    `, { TenSanPham, MaDanhMuc, ThuongHieu, GiaNhap, GiaBan, SoLuong, MoTa, HinhAnh });
+      VALUES (
+        @TenSanPham, @MaDanhMuc, @ThuongHieu, @GiaNhap, @GiaBan, @GiaKhuyenMai, @SoLuong,
+        @MoTa, @ThanhPhan, @CongDung, @HuongDanSuDung, @HinhAnh, @TrangThai
+      )
+    `, { 
+      TenSanPham, 
+      MaDanhMuc:        Number(MaDanhMuc), 
+      ThuongHieu:       ThuongHieu       || null, 
+      GiaNhap:          Number(GiaNhap), 
+      GiaBan:           Number(GiaBan), 
+      GiaKhuyenMai:     GiaKhuyenMai     ? Number(GiaKhuyenMai) : null,
+      SoLuong:          Number(SoLuong), 
+      MoTa:             MoTa             || null,
+      ThanhPhan:        ThanhPhan        || null,
+      CongDung:         CongDung         || null,
+      HuongDanSuDung:   HuongDanSuDung   || null,
+      HinhAnh:          HinhAnh          || null,
+      TrangThai:        TrangThai        || 'ĐANG BÁN'
+    });
     
     res.status(201).json({
       success: true,
@@ -103,7 +143,21 @@ router.post('/', async (req, res) => {
 // PUT update product
 router.put('/:id', async (req, res) => {
   try {
-    const { TenSanPham, MaDanhMuc, ThuongHieu, GiaNhap, GiaBan, SoLuong, MoTa, HinhAnh } = req.body;
+    const { 
+      TenSanPham, 
+      MaDanhMuc, 
+      ThuongHieu, 
+      GiaNhap, 
+      GiaBan, 
+      GiaKhuyenMai,
+      SoLuong, 
+      MoTa, 
+      ThanhPhan,
+      CongDung,
+      HuongDanSuDung,
+      HinhAnh,
+      TrangThai
+    } = req.body;
     
     const result = await execute(`
       UPDATE SanPham
@@ -112,13 +166,33 @@ router.put('/:id', async (req, res) => {
           ThuongHieu = @ThuongHieu,
           GiaNhap = @GiaNhap,
           GiaBan = @GiaBan,
+          GiaKhuyenMai = @GiaKhuyenMai,
           SoLuong = @SoLuong,
           MoTa = @MoTa,
-          HinhAnh = @HinhAnh
+          ThanhPhan = @ThanhPhan,
+          CongDung = @CongDung,
+          HuongDanSuDung = @HuongDanSuDung,
+          HinhAnh = @HinhAnh,
+          TrangThai = @TrangThai
       WHERE MaSanPham = @id
-    `, { TenSanPham, MaDanhMuc, ThuongHieu, GiaNhap, GiaBan, SoLuong, MoTa, HinhAnh, id: Number(req.params.id) });
+    `, { 
+      TenSanPham, 
+      MaDanhMuc, 
+      ThuongHieu: ThuongHieu || null, 
+      GiaNhap, 
+      GiaBan, 
+      GiaKhuyenMai: GiaKhuyenMai || null,
+      SoLuong, 
+      MoTa: MoTa || null,
+      ThanhPhan: ThanhPhan || null,
+      CongDung: CongDung || null,
+      HuongDanSuDung: HuongDanSuDung || null,
+      HinhAnh: HinhAnh || null,
+      TrangThai: TrangThai || 'ĐANG BÁN',
+      id: Number(req.params.id) 
+    });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
     }
     
@@ -134,7 +208,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const result = await execute('DELETE FROM SanPham WHERE MaSanPham = @id', { id: Number(req.params.id) });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
     }
     

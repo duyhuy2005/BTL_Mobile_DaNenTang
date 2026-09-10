@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
     
     // Count total
     const countSql = `SELECT COUNT(*) as total FROM KhachHang ${whereSQL}`;
-    const total = await queryOne(countSql, params);
+    const total = await queryOne<{ total: number }>(countSql, params) || { total: 0 };
     
     // Get paginated data with invoice count
     const dataSql = `
@@ -124,7 +124,7 @@ router.put('/:id', async (req, res) => {
       WHERE MaKhachHang = @id
     `, { HoTen, SoDienThoai, Email, DiaChi, TrangThai, id: Number(req.params.id) });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng' });
     }
     
@@ -139,7 +139,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const result = await execute('DELETE FROM KhachHang WHERE MaKhachHang = @id', { id: Number(req.params.id) });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng' });
     }
     
