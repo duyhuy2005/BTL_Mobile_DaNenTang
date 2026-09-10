@@ -7,17 +7,37 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const isAdmin = user.VaiTro === 'Admin';
 
-  const menuItems = [
-    { path: '/', icon: '🏠', label: 'Trang chủ' },
-    { path: '/products', icon: '💄', label: 'Sản phẩm' },
+  // Menu cho Admin - có đầy đủ quyền
+  const adminMenuItems: { path: string; icon: string; label: string; badge?: string }[] = [
+    { path: '/', icon: '📊', label: 'Tổng quan' },
+    { path: '/products', icon: '📦', label: 'Sản phẩm' },
     { path: '/categories', icon: '📁', label: 'Danh mục' },
+    { path: '/warehouse', icon: '🏬', label: 'Kho hàng' },
+    { path: '/invoices', icon: '🛒', label: 'Đơn hàng' },
+    { path: '/deliveries', icon: '🚚', label: 'Vận chuyển' },
+    { path: '/returns', icon: '↩️', label: 'Hoàn trả' },
     { path: '/customers', icon: '👥', label: 'Khách hàng' },
-    { path: '/invoices', icon: '🧾', label: 'Hóa đơn' },
-    { path: '/deliveries', icon: '🚚', label: 'Giao hàng' },
-    { path: '/returns', icon: '↩️', label: 'Hoàn đổi trả' },
-    { path: '/staff', icon: '👔', label: 'Nhân viên' },
+    { path: '/staff', icon: '👨‍💼', label: 'Nhân viên' },
+    { path: '/promotions', icon: '🎁', label: 'Khuyến mãi' },
+    { path: '/vouchers', icon: '🎟', label: 'Voucher' },
+    { path: '/reviews', icon: '⭐', label: 'Đánh giá' },
+    { path: '/reports', icon: '📈', label: 'Báo cáo' },
   ];
+
+  // Menu cho Nhân viên - quyền hạn giới hạn theo yêu cầu
+  const staffMenuItems: { path: string; icon: string; label: string; badge?: string }[] = [
+    { path: '/', icon: '📊', label: 'Tổng quan' },
+    { path: '/products', icon: '📦', label: 'Sản phẩm', badge: '👁' }, // Chỉ xem
+    { path: '/warehouse', icon: '🏬', label: 'Kho hàng', badge: '👁' }, // Chỉ xem
+    { path: '/invoices', icon: '🛒', label: 'Đơn hàng' }, // Xử lý
+    { path: '/deliveries', icon: '🚚', label: 'Vận chuyển' }, // Xử lý
+    { path: '/returns', icon: '↩️', label: 'Hoàn trả' }, // Tiếp nhận/kiểm tra
+    { path: '/customers', icon: '👥', label: 'Khách hàng', badge: '👁' }, // Chỉ xem
+  ];
+
+  const menuItems = isAdmin ? adminMenuItems : staffMenuItems;
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -48,7 +68,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               }`}
             >
               <span className="text-lg">{item.icon}</span>
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {item.badge && (
+                <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">{item.badge}</span>
+              )}
             </Link>
           ))}
         </nav>
@@ -94,7 +117,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 }`}
               >
                 <span className="text-lg">{item.icon}</span>
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">{item.badge}</span>
+                )}
               </Link>
             ))}
           </nav>
@@ -120,8 +146,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-gray-900">Admin</p>
-                <p className="text-xs text-gray-500">Quản trị viên</p>
+                <p className="text-sm font-semibold text-gray-900">{user.TenDangNhap || 'User'}</p>
+                <p className="text-xs text-gray-500">
+                  {isAdmin ? '🔑 Quản trị viên' : '👤 Nhân viên'}
+                </p>
               </div>
             </div>
           </div>

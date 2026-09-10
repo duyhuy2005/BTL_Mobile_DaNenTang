@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { query, execute } from '../config/database';
+import { query, queryOne, execute } from '../config/database';
 
 const router = Router();
 
@@ -8,33 +8,44 @@ router.get('/', async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
-    const search = req.query.search as string || '';
+    const search = (req.query.search as string) || '';
     const offset = (page - 1) * limit;
 
-    let whereClause = '';
+    let whereClause = 'WHERE 1=1';
+    const params: any = { offset, limit };
+
     if (search) {
-      whereClause = `WHERE HoTen LIKE N'%${search}%' OR ChucVu LIKE N'%${search}%' OR SoDienThoai LIKE '%${search}%' OR Email LIKE '%${search}%'`;
+      whereClause += ` AND (NV.HoTen LIKE @search OR NV.ChucVu LIKE @search OR NV.SoDienThoai LIKE @search OR NV.Email LIKE @search)`;
+      params.search = `%${search}%`;
     }
 
     const data = await query(`
       SELECT 
-        MaNhanVien,
-        HoTen,
-        ChucVu,
-        SoDienThoai,
-        Email,
-        NgayVaoLam
-      FROM NhanVien
+        NV.MaNhanVien,
+        NV.HoTen,
+        NV.ChucVu,
+        NV.SoDienThoai,
+        NV.Email,
+        NV.NgayVaoLam,
+        NV.TrangThai,
+        TK.TenDangNhap,
+        TK.VaiTro
+      FROM NhanVien NV
+      LEFT JOIN TaiKhoan TK ON NV.MaTaiKhoan = TK.MaTaiKhoan
       ${whereClause}
-      ORDER BY MaNhanVien DESC
-      OFFSET ${offset} ROWS
-      FETCH NEXT ${limit} ROWS ONLY
-    `);
+      ORDER BY NV.MaNhanVien DESC
+      OFFSET @offset ROWS
+      FETCH NEXT @limit ROWS ONLY
+    `, params);
 
-    const countResult = await query<{ Total: number }>(`
-      SELECT COUNT(*) as Total FROM NhanVien ${whereClause}
-    `);
-    const total = countResult[0]?.Total || 0;
+    const countResult = await queryOne<{ total: number }>(`
+      SELECT COUNT(*) as total 
+      FROM NhanVien NV
+      LEFT JOIN TaiKhoan TK ON NV.MaTaiKhoan = TK.MaTaiKhoan
+      ${whereClause}
+    `, search ? { search: `%${search}%` } : {});
+
+    const total = countResult?.total || 0;
 
     res.json({
       success: true,
@@ -54,27 +65,27 @@ router.get('/', async (req, res) => {
 // GET staff by ID
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const data = await query(`
+    const data = await queryOne(`
       SELECT 
-        MaNhanVien,
-        HoTen,
-        ChucVu,
-        SoDienThoai,
-        Email,
-        NgayVaoLam
-      FROM NhanVien
-      WHERE MaNhanVien = ${id}
-    `);
+        NV.MaNhanVien,
+        NV.HoTen,
+        NV.ChucVu,
+        NV.SoDienThoai,
+        NV.Email,
+        NV.NgayVaoLam,
+        NV.TrangThai,
+        TK.TenDangNhap,
+        TK.VaiTro
+      FROM NhanVien NV
+      LEFT JOIN TaiKhoan TK ON NV.MaTaiKhoan = TK.MaTaiKhoan
+      WHERE NV.MaNhanVien = @id
+    `, { id: Number(req.params.id) });
 
-    if (data.length === 0) {
+    if (!data) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy nhân viên' });
     }
 
-    res.json({
-      success: true,
-      data: data[0]
-    });
+    res.json({ success: true, data });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -85,47 +96,46 @@ router.post('/', async (req, res) => {
   try {
     const { HoTen, ChucVu, SoDienThoai, Email, NgayVaoLam } = req.body;
 
-    // Validate
     if (!HoTen || !ChucVu || !SoDienThoai) {
       return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc' });
     }
 
     // Check duplicate phone
-    const existingPhone = await query(`
-      SELECT MaNhanVien FROM NhanVien WHERE SoDienThoai = '${SoDienThoai}'
-    `);
-    if (existingPhone.length > 0) {
+    const existingPhone = await queryOne(
+      `SELECT MaNhanVien FROM NhanVien WHERE SoDienThoai = @sdt`,
+      { sdt: SoDienThoai }
+    );
+    if (existingPhone) {
       return res.status(400).json({ success: false, message: 'Số điện thoại đã tồn tại' });
     }
 
-    // Check duplicate email if provided
+    // Check duplicate email
     if (Email) {
-      const existingEmail = await query(`
-        SELECT MaNhanVien FROM NhanVien WHERE Email = '${Email}'
-      `);
-      if (existingEmail.length > 0) {
+      const existingEmail = await queryOne(
+        `SELECT MaNhanVien FROM NhanVien WHERE Email = @email`,
+        { email: Email }
+      );
+      if (existingEmail) {
         return res.status(400).json({ success: false, message: 'Email đã tồn tại' });
       }
     }
 
     const result = await execute(`
-      INSERT INTO NhanVien (HoTen, ChucVu, SoDienThoai, Email, NgayVaoLam)
-      VALUES (
-        N'${HoTen}',
-        N'${ChucVu}',
-        '${SoDienThoai}',
-        ${Email ? `'${Email}'` : 'NULL'},
-        ${NgayVaoLam ? `'${NgayVaoLam}'` : 'GETDATE()'}
-      );
-      SELECT SCOPE_IDENTITY() as MaNhanVien;
-    `);
-
-    const newId = result.recordset[0].MaNhanVien;
+      INSERT INTO NhanVien (HoTen, ChucVu, SoDienThoai, Email, NgayVaoLam, TrangThai)
+      OUTPUT INSERTED.MaNhanVien
+      VALUES (@HoTen, @ChucVu, @SoDienThoai, @Email, @NgayVaoLam, 1)
+    `, {
+      HoTen,
+      ChucVu,
+      SoDienThoai,
+      Email: Email || null,
+      NgayVaoLam: NgayVaoLam || new Date().toISOString().split('T')[0]
+    });
 
     res.status(201).json({
       success: true,
       message: 'Thêm nhân viên thành công',
-      data: { MaNhanVien: newId }
+      data: { MaNhanVien: result.recordset[0]?.MaNhanVien }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -135,34 +145,34 @@ router.post('/', async (req, res) => {
 // PUT update staff
 router.put('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { HoTen, ChucVu, SoDienThoai, Email, NgayVaoLam } = req.body;
+    const id = Number(req.params.id);
+    const { HoTen, ChucVu, SoDienThoai, Email, NgayVaoLam, TrangThai } = req.body;
 
-    // Check if staff exists
-    const existing = await query(`SELECT MaNhanVien FROM NhanVien WHERE MaNhanVien = ${id}`);
-    if (existing.length === 0) {
+    const existing = await queryOne(`SELECT MaNhanVien FROM NhanVien WHERE MaNhanVien = @id`, { id });
+    if (!existing) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy nhân viên' });
     }
 
-    // Validate
     if (!HoTen || !ChucVu || !SoDienThoai) {
       return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc' });
     }
 
-    // Check duplicate phone (exclude current staff)
-    const existingPhone = await query(`
-      SELECT MaNhanVien FROM NhanVien WHERE SoDienThoai = '${SoDienThoai}' AND MaNhanVien != ${id}
-    `);
-    if (existingPhone.length > 0) {
+    // Check duplicate phone (exclude current)
+    const existingPhone = await queryOne(
+      `SELECT MaNhanVien FROM NhanVien WHERE SoDienThoai = @sdt AND MaNhanVien != @id`,
+      { sdt: SoDienThoai, id }
+    );
+    if (existingPhone) {
       return res.status(400).json({ success: false, message: 'Số điện thoại đã tồn tại' });
     }
 
-    // Check duplicate email (exclude current staff)
+    // Check duplicate email (exclude current)
     if (Email) {
-      const existingEmail = await query(`
-        SELECT MaNhanVien FROM NhanVien WHERE Email = '${Email}' AND MaNhanVien != ${id}
-      `);
-      if (existingEmail.length > 0) {
+      const existingEmail = await queryOne(
+        `SELECT MaNhanVien FROM NhanVien WHERE Email = @email AND MaNhanVien != @id`,
+        { email: Email, id }
+      );
+      if (existingEmail) {
         return res.status(400).json({ success: false, message: 'Email đã tồn tại' });
       }
     }
@@ -170,18 +180,24 @@ router.put('/:id', async (req, res) => {
     await execute(`
       UPDATE NhanVien
       SET 
-        HoTen = N'${HoTen}',
-        ChucVu = N'${ChucVu}',
-        SoDienThoai = '${SoDienThoai}',
-        Email = ${Email ? `'${Email}'` : 'NULL'},
-        NgayVaoLam = ${NgayVaoLam ? `'${NgayVaoLam}'` : 'NgayVaoLam'}
-      WHERE MaNhanVien = ${id}
-    `);
-
-    res.json({
-      success: true,
-      message: 'Cập nhật nhân viên thành công'
+        HoTen = @HoTen,
+        ChucVu = @ChucVu,
+        SoDienThoai = @SoDienThoai,
+        Email = @Email,
+        NgayVaoLam = @NgayVaoLam,
+        TrangThai = @TrangThai
+      WHERE MaNhanVien = @id
+    `, {
+      HoTen,
+      ChucVu,
+      SoDienThoai,
+      Email: Email || null,
+      NgayVaoLam: NgayVaoLam || null,
+      TrangThai: TrangThai !== undefined ? TrangThai : 1,
+      id
     });
+
+    res.json({ success: true, message: 'Cập nhật nhân viên thành công' });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -190,29 +206,24 @@ router.put('/:id', async (req, res) => {
 // DELETE staff
 router.delete('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
 
-    // Check if staff exists
-    const existing = await query(`SELECT MaNhanVien FROM NhanVien WHERE MaNhanVien = ${id}`);
-    if (existing.length === 0) {
+    const existing = await queryOne(`SELECT MaNhanVien FROM NhanVien WHERE MaNhanVien = @id`, { id });
+    if (!existing) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy nhân viên' });
     }
 
-    // Check if staff has related invoices
-    const hasInvoices = await query(`SELECT COUNT(*) as Total FROM HoaDon WHERE MaNhanVien = ${id}`);
-    if (hasInvoices[0].Total > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Không thể xóa nhân viên đã có hóa đơn. Vui lòng xóa các hóa đơn trước.' 
-      });
+    // Check if staff has related invoices → soft delete (TrangThai = 0)
+    const hasInvoices = await queryOne<{ total: number }>(
+      `SELECT COUNT(*) as total FROM HoaDon WHERE MaNhanVien = @id`, { id }
+    );
+    if ((hasInvoices?.total || 0) > 0) {
+      await execute(`UPDATE NhanVien SET TrangThai = 0 WHERE MaNhanVien = @id`, { id });
+      return res.json({ success: true, message: 'Đã ngừng hoạt động nhân viên (có hóa đơn liên quan)' });
     }
 
-    await execute(`DELETE FROM NhanVien WHERE MaNhanVien = ${id}`);
-
-    res.json({
-      success: true,
-      message: 'Xóa nhân viên thành công'
-    });
+    await execute(`DELETE FROM NhanVien WHERE MaNhanVien = @id`, { id });
+    res.json({ success: true, message: 'Xóa nhân viên thành công' });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

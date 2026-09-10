@@ -19,15 +19,22 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Import routes
 import authRoutes from './routes/auth';
+import baocaoRoutes from './routes/baocao';
 import danhmucRoutes from './routes/danhmuc';
 import dashboardRoutes from './routes/dashboard';
 import giaohangRoutes from './routes/giaohang';
 import hoadonRoutes from './routes/hoadon';
 import hoandoitraRoutes from './routes/hoandoitra';
+import inventoryRoutes from './routes/inventory';
 import khachhangRoutes from './routes/khachhang';
+import khuyenmaiRoutes from './routes/khuyenmai';
+import nhacungcapRoutes from './routes/nhacungcap';
 import nhanvienRoutes from './routes/nhanvien';
+import phieunhapRoutes from './routes/phieunhap';
+import phieuxuatRoutes from './routes/phieuxuat';
 import sanphamRoutes from './routes/sanpham';
 import uploadRoutes from './routes/upload';
+import yeuthichRoutes from './routes/yeuthich';
 
 import { authenticate, authorizeAdmin } from './middleware/auth';
 
@@ -35,15 +42,23 @@ import { authenticate, authorizeAdmin } from './middleware/auth';
 app.use('/api/auth', authRoutes);
 
 // Protected routes - require authentication
-app.use('/api/dashboard', authenticate, authorizeAdmin, dashboardRoutes);
+app.use('/api/dashboard', authenticate, dashboardRoutes); // Cho phép cả Admin và Nhân viên xem
 app.use('/api/sanpham', authenticate, sanphamRoutes);
 app.use('/api/danhmuc', authenticate, danhmucRoutes);
 app.use('/api/hoadon', authenticate, hoadonRoutes);
 app.use('/api/giaohang', authenticate, giaohangRoutes);
 app.use('/api/hoandoitra', authenticate, hoandoitraRoutes);
 app.use('/api/khachhang', authenticate, khachhangRoutes);
-app.use('/api/nhanvien', authenticate, nhanvienRoutes);
-app.use('/api/upload', authenticate, uploadRoutes);
+app.use('/api/nhanvien',   authenticate, nhanvienRoutes);
+app.use('/api/upload',     authenticate, uploadRoutes);
+app.use('/api/yeuthich',   authenticate, yeuthichRoutes);
+app.use('/api/khuyenmai',  authenticate, khuyenmaiRoutes);
+app.use('/api/baocao',     authenticate, baocaoRoutes);
+// Kho hàng
+app.use('/api/inventory',  authenticate, inventoryRoutes);
+app.use('/api/nhacungcap', authenticate, nhacungcapRoutes);
+app.use('/api/phieunhap',  authenticate, phieunhapRoutes);
+app.use('/api/phieuxuat',  authenticate, phieuxuatRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -88,6 +103,7 @@ async function startServer() {
       console.log('      GET    /api/khachhang');
       console.log('      GET    /api/nhanvien');
       console.log('      POST   /api/upload (Upload ảnh)');
+      console.log('      GET    /api/yeuthich/:maKhachHang (Yêu thích)');
       console.log('      GET    /uploads/products/:filename');
       console.log('═══════════════════════════════════════════════════════');
       console.log('');

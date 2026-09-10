@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { execute, query, queryOne, sql, getPool } from '../config/database';
+import { execute, query, queryOne } from '../config/database';
 
 const router = Router();
 
@@ -51,7 +51,7 @@ router.get('/', async (req, res) => {
     }
     
     const countSql = `SELECT COUNT(*) as total FROM (${sqlQuery}) as counted`;
-    const total = await queryOne(countSql, params);
+    const total = await queryOne<{ total: number }>(countSql, params) || { total: 0 };
     
     sqlQuery = `
       SELECT * FROM (${sqlQuery}) as temp
@@ -231,7 +231,7 @@ router.put('/:id', async (req, res) => {
       GhiChu: GhiChu || null
     });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin giao hàng' });
     }
     
@@ -268,7 +268,7 @@ router.put('/:id/status', async (req, res) => {
       GhiChu: GhiChu || null
     });
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin giao hàng' });
     }
     
@@ -289,7 +289,7 @@ router.delete('/:id', async (req, res) => {
       { id: Number(req.params.id) }
     );
     
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected === 0) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin giao hàng' });
     }
     

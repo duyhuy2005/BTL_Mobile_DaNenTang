@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
     }
     
     const countSql = `SELECT COUNT(*) as total FROM (${sqlQuery}) as counted`;
-    const total = await queryOne(countSql, params);
+    const total = await queryOne<{ total: number }>(countSql, params) || { total: 0 };
     
     sqlQuery = `
       SELECT * FROM (${sqlQuery}) as temp
