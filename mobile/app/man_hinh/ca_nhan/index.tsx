@@ -1,199 +1,36 @@
-import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
+import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "@/nguon/AuthContext";
+import { khachHangService } from "@/dich_vu/khachHang";
+import { KhachHang } from "@/kieu_du_lieu/KhachHang";
+import { duongDanAnh } from "@/dich_vu/duongDanAnh";
 
-const MENU = [
-  {
-    icon: "person-outline",
-    label: "Thông tin cá nhân",
-    route: "/man_hinh/ca_nhan",
-  },
-  {
-    icon: "bag-handle-outline",
-    label: "Đơn hàng của tôi",
-    route: "/man_hinh/don_hang",
-  },
-  {
-    icon: "heart-outline",
-    label: "Sản phẩm yêu thích",
-    route: "/man_hinh/yeu_thich",
-  },
-  {
-    icon: "refresh-outline",
-    label: "Yêu cầu hoàn trả",
-    route: "/man_hinh/hoan_tra",
-  },
-  {
-    icon: "star-outline",
-    label: "Đánh giá của tôi",
-    route: "/man_hinh/danh_gia",
-  },
-  {
-    icon: "notifications-outline",
-    label: "Thông báo",
-    route: "/man_hinh/ca_nhan",
-  },
-  { icon: "settings-outline", label: "Cài đặt", route: "/man_hinh/ca_nhan" },
-];
-
+const links = [
+  ["person-outline", "Hồ sơ cá nhân", "/man_hinh/ho_so_ca_nhan"], ["location-outline", "Địa chỉ nhận hàng", "/man_hinh/dia_chi"],
+  ["ticket-outline", "Voucher của tôi", "/man_hinh/voucher"], ["heart-outline", "Sản phẩm yêu thích", "/man_hinh/yeu_thich"],
+  ["star-outline", "Đánh giá của tôi", "/man_hinh/danh_gia"], ["return-down-back-outline", "Yêu cầu hoàn trả", "/man_hinh/hoan_tra"],
+  ["notifications-outline", "Thông báo & hỗ trợ", "/man_hinh/thong_bao_ho_tro"],
+] as const;
 export default function CaNhanScreen() {
-  const handleLogout = () => {
-    Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [
-      { text: "Hủy", style: "cancel" },
-      {
-        text: "Đăng xuất",
-        style: "destructive",
-        onPress: () => router.replace("/man_hinh/dang_nhap"),
-      },
-    ]);
-  };
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Tài khoản</Text>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.container}>
-        {/* Avatar */}
-        <View style={styles.profileSection}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={40} color="#e91e8c" />
-          </View>
-          <Text style={styles.name}>Nguyễn Thị An</Text>
-          <Text style={styles.email}>admin@gmail.com</Text>
-          <TouchableOpacity style={styles.btnEdit}>
-            <Text style={styles.btnEditText}>Chỉnh sửa hồ sơ</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          {[
-            ["3", "Đơn hàng"],
-            ["5", "Yêu thích"],
-            ["2", "Đánh giá"],
-          ].map(([num, label]) => (
-            <View key={label} style={styles.statItem}>
-              <Text style={styles.statNum}>{num}</Text>
-              <Text style={styles.statLabel}>{label}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Menu */}
-        <View style={styles.menuCard}>
-          {MENU.map((item, idx) => (
-            <TouchableOpacity
-              key={idx}
-              style={[
-                styles.menuRow,
-                idx < MENU.length - 1 && styles.menuBorder,
-              ]}
-              onPress={() => router.push(item.route as any)}
-            >
-              <View style={styles.menuIcon}>
-                <Ionicons name={item.icon as any} size={20} color="#e91e8c" />
-              </View>
-              <Text style={styles.menuLabel}>{item.label}</Text>
-              <Ionicons name="chevron-forward" size={18} color="#ccc" />
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Logout */}
-        <TouchableOpacity
-          style={styles.btnLogout}
-          onPress={handleLogout}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="log-out-outline" size={20} color="#ff5252" />
-          <Text style={styles.btnLogoutText}>Đăng xuất</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
-  );
+  const { token, user, khachHang: profile, authStatus, authError, khoiPhucPhien, dangXuat } = useAuth();
+  const [summary, setSummary] = useState<any>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  const load = useCallback(async () => { if (!token) { setLoading(false); return; } setLoading(true); setError(""); try { const s = await khachHangService.tomTat(token); setSummary(s.data); } catch (e: any) { setError(e?.message || "Không thể tải tài khoản"); } finally { setLoading(false); } }, [token]);
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  const logout = () => Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [{ text: "Hủy", style: "cancel" }, { text: "Đăng xuất", style: "destructive", onPress: async () => { await dangXuat(); router.dismissAll(); router.replace("/man_hinh/dang_nhap"); } }]);
+  if (authStatus === "restoring") return <SafeAreaView style={s.safe}><View style={s.center}><ActivityIndicator color="#176A50"/><Text style={s.muted}>Đang xác minh phiên đăng nhập…</Text></View></SafeAreaView>;
+  if (authStatus === "error") return <SafeAreaView style={s.safe}><View style={s.center}><Ionicons name="cloud-offline-outline" size={56} color="#C87942"/><Text style={s.title}>Chưa thể kiểm tra tài khoản</Text><Text style={s.muted}>{authError || "Kiểm tra kết nối rồi thử lại."}</Text><TouchableOpacity style={s.primary} onPress={()=>void khoiPhucPhien()}><Text style={s.primaryText}>Thử lại</Text></TouchableOpacity></View></SafeAreaView>;
+  if (authStatus === "guest" || !token) return <SafeAreaView style={s.safe}><View style={s.center}><Ionicons name="person-circle-outline" size={76} color={s.green.color} /><Text style={s.title}>Tài khoản BeautyStore</Text><Text style={s.muted}>Đăng nhập để xem đơn hàng, địa chỉ và ưu đãi của bạn.</Text><TouchableOpacity style={s.primary} onPress={() => router.push("/man_hinh/dang_nhap")}><Text style={s.primaryText}>Đăng nhập</Text></TouchableOpacity><TouchableOpacity onPress={() => router.push("/man_hinh/dang_ky")}><Text style={s.link}>Tạo tài khoản</Text></TouchableOpacity></View></SafeAreaView>;
+  return <SafeAreaView style={s.safe}><View style={s.header}><Text style={s.title}>Tài khoản</Text><TouchableOpacity onPress={() => router.push("/man_hinh/ho_so_ca_nhan")}><Ionicons name="settings-outline" size={23} color="#173E32" /></TouchableOpacity></View>
+    {loading && !profile ? <View style={s.center}><ActivityIndicator color="#176A50" /><Text style={s.muted}>Đang tải tài khoản…</Text></View> : <ScrollView contentContainerStyle={s.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#176A50" />}>
+      {!!error && <View style={s.error}><Text style={s.errorText}>{error}</Text><TouchableOpacity onPress={() => void load()}><Text style={s.link}>Thử lại</Text></TouchableOpacity></View>}
+      <TouchableOpacity style={s.profile} onPress={() => router.push("/man_hinh/ho_so_ca_nhan")}><View style={s.avatar}>{profile?.AnhDaiDien?<Image source={{uri:duongDanAnh(profile.AnhDaiDien)}} style={s.avatarImage}/>:<Text style={s.initials}>{(profile?.HoTen || user?.HoTen || "KH").split(/\s+/).slice(-2).map(x => x[0]).join("").toUpperCase()}</Text>}</View><View style={{ flex: 1 }}><Text style={s.name}>{profile?.HoTen || user?.HoTen || "Khách hàng"}</Text><Text style={s.muted}>{profile?.SoDienThoai || "Cập nhật số điện thoại"}</Text></View><Ionicons name="create-outline" size={20} color="#176A50" /></TouchableOpacity>
+      <View style={s.sectionHead}><Text style={s.section}>Đơn hàng của tôi</Text><TouchableOpacity onPress={() => router.push({ pathname: "/man_hinh/don_hang", params: { tab: "ALL" } })}><Text style={s.link}>Xem tất cả ›</Text></TouchableOpacity></View>
+      <View style={s.orders}>{[["receipt-outline", "Chờ xác nhận", summary?.ChoXacNhan || 0, "CHO_XAC_NHAN"], ["car-outline", "Đang giao", summary?.DangGiao || 0, "DANG_GIAO"], ["cube-outline", "Hoàn tất", summary?.HoanTat || 0, "HOAN_TAT"], ["return-down-back-outline", "Hoàn trả", summary?.HoanTra || 0, "RETURN"]].map(([icon, label, count, status]) => <TouchableOpacity key={String(status)} style={s.order} onPress={() => status === "RETURN" ? router.push("/man_hinh/hoan_tra") : router.push({ pathname: "/man_hinh/don_hang", params: { tab: String(status) } })}><Ionicons name={icon as any} size={24} color="#E67B37" /><Text style={s.count}>{count}</Text><Text style={s.mutedSmall}>{label}</Text></TouchableOpacity>)}</View>
+      <View style={s.card}>{links.map(([icon, label, path], i) => <TouchableOpacity key={path} style={[s.row, i < links.length - 1 && s.divider]} onPress={() => router.push(path as any)}><Ionicons name={icon as any} size={21} color="#E67B37" /><Text style={s.rowText}>{label}</Text><Ionicons name="chevron-forward" size={18} color="#7B8A85" /></TouchableOpacity>)}</View>
+      <TouchableOpacity style={s.logout} onPress={logout}><Ionicons name="log-out-outline" size={19} color="#CF6330" /><Text style={s.logoutText}>Đăng xuất</Text></TouchableOpacity>
+    </ScrollView>}</SafeAreaView>;
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#f8f8f8" },
-  header: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
-  },
-  title: { fontSize: 20, fontWeight: "800", color: "#333" },
-  container: { paddingBottom: 36 },
-  profileSection: {
-    alignItems: "center",
-    backgroundColor: "#fff",
-    paddingVertical: 28,
-    marginBottom: 12,
-  },
-  avatar: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: "#fce4ec",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
-  name: { fontSize: 18, fontWeight: "700", color: "#333", marginBottom: 4 },
-  email: { fontSize: 13, color: "#888", marginBottom: 14 },
-  btnEdit: {
-    backgroundColor: "#fce4ec",
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-  },
-  btnEditText: { color: "#e91e8c", fontWeight: "600", fontSize: 13 },
-  statsRow: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    marginBottom: 12,
-    paddingVertical: 16,
-  },
-  statItem: { flex: 1, alignItems: "center" },
-  statNum: { fontSize: 20, fontWeight: "800", color: "#7c3aed" },
-  statLabel: { fontSize: 12, color: "#888", marginTop: 2 },
-  menuCard: { backgroundColor: "#fff", marginHorizontal: 0, marginBottom: 12 },
-  menuRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  menuBorder: { borderBottomWidth: 1, borderBottomColor: "#f5f5f5" },
-  menuIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#fce4ec",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  menuLabel: { flex: 1, fontSize: 14, color: "#333", fontWeight: "500" },
-  btnLogout: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginHorizontal: 16,
-    backgroundColor: "#fff",
-    borderRadius: 13,
-    height: 50,
-    elevation: 1,
-  },
-  btnLogoutText: { color: "#ff5252", fontSize: 15, fontWeight: "700" },
-});
+const s = StyleSheet.create({ safe:{flex:1,backgroundColor:"#F6FAF7"},header:{padding:18,backgroundColor:"white",flexDirection:"row",justifyContent:"space-between",alignItems:"center"},title:{fontSize:23,fontWeight:"800",color:"#123E33"},content:{padding:16,paddingBottom:30,gap:14},center:{flex:1,alignItems:"center",justifyContent:"center",padding:25,gap:12},muted:{color:"#68756F",fontSize:14,marginTop:5},mutedSmall:{color:"#56645D",fontSize:11,textAlign:"center",marginTop:5},profile:{backgroundColor:"white",borderRadius:18,padding:15,flexDirection:"row",alignItems:"center",gap:13,borderWidth:1,borderColor:"#E7EEE9"},avatar:{width:62,height:62,borderRadius:31,backgroundColor:"#CBE7DA",alignItems:"center",justifyContent:"center",overflow:"hidden"},avatarImage:{width:62,height:62},initials:{fontSize:20,fontWeight:"800",color:"#14523E"},name:{fontSize:17,fontWeight:"800",color:"#152B24"},sectionHead:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},section:{fontSize:16,fontWeight:"800",color:"#173E32"},link:{color:"#176A50",fontWeight:"700",marginTop:10},orders:{backgroundColor:"white",borderRadius:16,paddingVertical:15,flexDirection:"row",justifyContent:"space-around",borderWidth:1,borderColor:"#E7EEE9"},order:{alignItems:"center",minWidth:68},count:{fontSize:16,fontWeight:"800",color:"#143E32",marginTop:5},card:{backgroundColor:"white",borderRadius:17,paddingHorizontal:14,borderWidth:1,borderColor:"#E7EEE9"},row:{minHeight:54,flexDirection:"row",alignItems:"center",gap:13},divider:{borderBottomWidth:1,borderColor:"#EDF1EE"},rowText:{flex:1,fontSize:14,color:"#293833"},logout:{backgroundColor:"white",borderRadius:13,minHeight:50,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,borderWidth:1,borderColor:"#F0DDD3"},logoutText:{color:"#CF6330",fontWeight:"700"},primary:{backgroundColor:"#176A50",paddingHorizontal:50,paddingVertical:15,borderRadius:13,marginTop:12},primaryText:{color:"white",fontWeight:"800"},error:{backgroundColor:"#FFF0EF",padding:14,borderRadius:12},errorText:{color:"#A23A34"},green:{color:"#176A50"}});

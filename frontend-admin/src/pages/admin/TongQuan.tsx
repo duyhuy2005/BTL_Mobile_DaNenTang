@@ -1,50 +1,35 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, Pie, PieChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { dashboardAPI } from '../../services/api';
+import { API_ORIGIN, dashboardAPI } from '../../services/api';
 import { formatCurrency } from '../../utils/format';
 
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
   const [topProducts, setTopProducts] = useState<any[]>([]);
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
-  const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [period, setPeriod] = useState(7);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [period]);
 
   const loadData = async () => {
+    setError('');
+    setLoading(true);
     try {
       const [statsRes, topRes] = await Promise.all([
-        dashboardAPI.getStats(),
+        dashboardAPI.getStats(period),
         dashboardAPI.getTopProducts(5),
       ]);
 
       const statsData = statsRes.data.data;
       setStats(statsData);
       setTopProducts(topRes.data.data);
-      
-      // Mock recent orders - TODO: Thay bằng API thực
-      setRecentOrders([
-        { id: 'HD0048', customer: 'Nguyễn Thị Lan', date: '07/06/2026 14:20', amount: 680000, status: 'Đang giao' },
-        { id: 'HD0047', customer: 'Trần Văn Minh', date: '07/06/2026 11:15', amount: 1290000, status: 'Đã giao hàng' },
-        { id: 'HD0046', customer: 'Lê Thị Hương', date: '06/06/2026 16:30', amount: 920000, status: 'Chờ xác nhận' },
-        { id: 'HD0045', customer: 'Phạm Minh Anh', date: '06/06/2026 09:45', amount: 540000, status: 'Hoàn thành' },
-        { id: 'HD0044', customer: 'Đỗ Thu Hà', date: '05/06/2026 18:20', amount: 1780000, status: 'Đã hủy' },
-      ]);
-
-      // Mock activities - TODO: Thay bằng API thực
-      setActivities([
-        { icon: '📦', title: 'Đơn hàng HD0048 đã được giao thành công', time: '07/06/2026 15:32', type: 'success' },
-        { icon: '🛒', title: 'Khách hàng Nguyễn Thị Lan đã đặt hàng', time: '07/06/2026 14:20', type: 'info' },
-        { icon: '⚠️', title: 'Sản phẩm Serum The Ordinary sắp hết hàng', time: '07/06/2026 14:15', type: 'warning' },
-        { icon: '👤', title: 'Nhân viên cập nhật trạng thái đơn HD0047', time: '07/06/2026 11:15', type: 'info' },
-        { icon: '↩️', title: 'Đơn hoàn trả RT0025 đã được duyệt', time: '07/06/2026 10:05', type: 'info' },
-      ]);
     } catch (error) {
       console.error('Dashboard error:', error);
+      setError((error as any)?.response?.data?.message || 'Không thể tải thống kê thật từ Backend.');
     } finally {
       setLoading(false);
     }
@@ -77,6 +62,8 @@ export default function Dashboard() {
     );
   }
 
+  if (error && !stats) return <div className="m-6 rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-800"><p>{error}</p><button onClick={() => void loadData()} className="mt-3 rounded-lg border border-rose-300 px-4 py-2">Thử lại</button></div>;
+
   return (
     <div className="p-4 bg-gray-50 min-h-screen">
       {/* Header */}
@@ -92,11 +79,10 @@ export default function Dashboard() {
             <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
               <span className="text-pink-600 text-xl">💰</span>
             </div>
-            <p className="text-xs text-gray-600">Tổng doanh thu</p>
+            <p className="text-xs text-gray-600">Doanh thu đơn hoàn tất</p>
           </div>
-          <p className="text-xl font-bold text-gray-900 mb-1">{formatCurrency(stats?.totalRevenue || 0)}</p>
-          <span className="text-green-600 text-xs font-medium">↑ 12.5%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <p className="text-xl font-bold text-gray-900 mb-1">{formatCurrency(stats?.completedProductRevenue || 0)}</p>
+          <span className="text-xs text-gray-500">Tiền hàng đơn đã giao, thu đủ; chưa trừ hoàn</span>
         </div>
 
         {/* Tổng đơn hàng */}
@@ -108,8 +94,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Tổng đơn hàng</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.totalOrders || 0}</p>
-          <span className="text-green-600 text-xs font-medium">↑ 8.3%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Đơn đã ghi nhận</span>
         </div>
 
         {/* Đơn chờ xác nhận */}
@@ -121,8 +106,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Đơn chờ xác nhận</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.pendingOrders || 0}</p>
-          <span className="text-green-600 text-xs font-medium">↑ 2.0%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Chờ xử lý</span>
         </div>
 
         {/* Đơn hoàn thành */}
@@ -134,8 +118,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Đơn hoàn thành</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.completedOrders || 0}</p>
-          <span className="text-green-600 text-xs font-medium">↑ 10.3%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Đã giao và đã thanh toán</span>
         </div>
 
         {/* Đơn bị hủy */}
@@ -147,9 +130,24 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Đơn bị hủy</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.cancelledOrders || 0}</p>
-          <span className="text-red-600 text-xs font-medium">↓ 50.0%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Không tính doanh thu hoàn tất</span>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-9 gap-3 mb-3">
+        {[
+          ['Hoàn tiền hàng', stats?.refundedProductAmount, 'Giao dịch hoàn đã xác nhận'],
+          ['Doanh thu thuần', stats?.netProductRevenue, 'Doanh thu hoàn tất − hoàn tiền hàng'],
+          ['Khách đã thanh toán', stats?.totalCustomerPaid, 'Gồm đơn chưa giao; thời điểm thu'],
+          ['COD chờ đối soát', stats?.codAwaitingReconciliation, 'Hãng đã thu, shop chưa quyết toán'],
+          ['Shop thực nhận', stats?.shopCashReceived, 'Shop nhận trực tiếp + hãng chuyển'],
+          ['Phí ship khách trả', stats?.customerShippingFees, 'Hiển thị riêng, không là doanh thu hàng'],
+          ['Phí hãng khấu trừ', stats?.reconciledCarrierFees, 'Từ các đợt đối soát COD'],
+          ['COD cũ cần rà soát', stats?.codLegacyUnverified, 'Dữ liệu trạng thái cũ không có sổ thu tiền'],
+          ['Thanh toán lịch sử thiếu chứng từ', stats?.unverifiedLegacyPaidAmount, `${Number(stats?.unverifiedLegacyPaidOrders || 0)} đơn; không cộng vào doanh thu đã kiểm chứng`],
+        ].map(([label, value, hint]) => <div key={String(label)} title={String(hint)} className="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+          <p className="text-xs text-gray-600">{label}</p><p className="text-lg font-bold text-gray-900 my-1">{formatCurrency(Number(value || 0))}</p><span className="text-[11px] text-gray-500">{hint}</span>
+        </div>)}
       </div>
 
       {/* Stats Cards - Row 2 (5 cards) */}
@@ -164,8 +162,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Số khách hàng</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.totalCustomers || 0}</p>
-          <span className="text-green-600 text-xs font-medium">↑ 5.6%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Hồ sơ khách hàng</span>
         </div>
 
         {/* Số sản phẩm */}
@@ -177,8 +174,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Số sản phẩm</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.totalProducts || 0}</p>
-          <span className="text-green-600 text-xs font-medium">↑ 3.2%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Không gồm sản phẩm đã xóa</span>
         </div>
 
         {/* Sản phẩm sắp hết */}
@@ -190,8 +186,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Sản phẩm sắp hết</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.lowStockProducts || 0}</p>
-          <span className="text-orange-600 text-xs font-medium">↑ 20.0%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Theo tồn có thể bán</span>
         </div>
 
         {/* Sản phẩm hết hàng */}
@@ -203,8 +198,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-600">Sản phẩm hết hàng</p>
           </div>
           <p className="text-xl font-bold text-gray-900 mb-1">{stats?.outOfStockProducts || 0}</p>
-          <span className="text-red-600 text-xs font-medium">↓ 16.7%</span>
-          <span className="text-xs text-gray-500 ml-1">so với tuần trước</span>
+          <span className="text-xs text-gray-500">Tồn có thể bán bằng 0</span>
         </div>
 
         {/* Đơn hoàn trả */}
@@ -235,12 +229,8 @@ export default function Dashboard() {
         {/* Doanh thu theo thời gian */}
         <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-100">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-900">Doanh thu theo thời gian</h2>
-            <div className="flex gap-1">
-              <button className="px-2 py-1 text-xs bg-pink-500 text-white rounded font-medium">Ngày</button>
-              <button className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded font-medium">Tháng</button>
-              <button className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded font-medium">Năm</button>
-            </div>
+            <div><h2 className="text-sm font-semibold text-gray-900">Doanh thu theo thời gian</h2><p className="text-[11px] text-gray-500">Chỉ số vận hành đồ án · kỳ {period} ngày, tính theo thời điểm đủ điều kiện thu tiền/hoàn tiền</p></div>
+            <select aria-label="Khoảng thời gian doanh thu" value={period} onChange={e => setPeriod(Number(e.target.value))} className="border rounded px-2 py-1 text-xs"><option value={7}>7 ngày</option><option value={30}>30 ngày</option><option value={90}>90 ngày</option></select>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={stats?.revenueLast7Days || []}>
@@ -263,13 +253,15 @@ export default function Dashboard() {
               <Tooltip />
               <Line 
                 type="monotone" 
-                dataKey="doanhThu" 
+                dataKey="doanhThuDonHoanTat"
                 stroke="#ec4899" 
                 strokeWidth={2}
                 fill="url(#colorRevenue)"
                 dot={{ fill: '#ec4899', r: 3 }}
-                activeDot={{ r: 5 }}
+                activeDot={{ r: 5 }} name="Doanh thu đơn hoàn tất"
               />
+              <Line type="monotone" dataKey="doanhThuThuan" stroke="#0f766e" strokeWidth={2} dot={false} name="Doanh thu thuần" />
+              <Line type="monotone" dataKey="hoanTienHang" stroke="#f97316" strokeWidth={2} dot={false} name="Hoàn tiền hàng" />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -334,7 +326,7 @@ export default function Dashboard() {
                 </div>
                 <div className="w-10 h-10 bg-gray-100 rounded overflow-hidden flex-shrink-0">
                   {product.HinhAnh ? (
-                    <img src={`http://localhost:3000${product.HinhAnh}`} alt={product.TenSanPham} className="w-full h-full object-cover" />
+                    <img src={`${API_ORIGIN}${product.HinhAnh}`} alt={product.TenSanPham} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">📦</div>
                   )}

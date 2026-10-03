@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api, { API_ORIGIN } from '../../services/api';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 
-const API = 'http://localhost:3000/api';
-const IMG = 'http://localhost:3000';
 
 const formatCurrency = (v: number) =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v || 0);
@@ -22,6 +20,7 @@ const PERIOD_OPTIONS = [
 export default function BaoCao() {
   const [period, setPeriod] = useState('30');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [tongQuan, setTongQuan] = useState<any>(null);
   const [doanhThu, setDoanhThu] = useState<any[]>([]);
   const [topSanPham, setTopSanPham] = useState<any[]>([]);
@@ -29,19 +28,17 @@ export default function BaoCao() {
   const [doanhThuDanhMuc, setDoanhThuDanhMuc] = useState<any[]>([]);
   const [topKhachHang, setTopKhachHang] = useState<any[]>([]);
 
-  const token = localStorage.getItem('token');
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchAll = async () => {
     setLoading(true);
+    setError('');
     try {
       const [r1, r2, r3, r4, r5, r6] = await Promise.all([
-        axios.get(`${API}/baocao/tong-quan`, { headers }),
-        axios.get(`${API}/baocao/doanh-thu`, { headers, params: { period } }),
-        axios.get(`${API}/baocao/san-pham-ban-chay`, { headers, params: { limit: 10 } }),
-        axios.get(`${API}/baocao/don-hang-trang-thai`, { headers }),
-        axios.get(`${API}/baocao/doanh-thu-danh-muc`, { headers }),
-        axios.get(`${API}/baocao/khach-hang-top`, { headers, params: { limit: 5 } }),
+        api.get('/baocao/tong-quan'),
+        api.get('/baocao/doanh-thu', { params: { period } }),
+        api.get('/baocao/san-pham-ban-chay', { params: { limit: 10 } }),
+        api.get('/baocao/don-hang-trang-thai'),
+        api.get('/baocao/doanh-thu-danh-muc'),
+        api.get('/baocao/khach-hang-top', { params: { limit: 5 } }),
       ]);
       setTongQuan(r1.data.data);
       setDoanhThu(r2.data.data || []);
@@ -51,6 +48,7 @@ export default function BaoCao() {
       setTopKhachHang(r6.data.data || []);
     } catch (err) {
       console.error(err);
+      setError((err as any)?.response?.data?.message || 'Không thể tải báo cáo từ Backend.');
     } finally {
       setLoading(false);
     }
@@ -64,8 +62,17 @@ export default function BaoCao() {
     </div>
   );
 
+  if (error) return <div className="m-6 rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-800"><p>{error}</p><button onClick={() => void fetchAll()} className="mt-3 rounded-lg border border-rose-300 px-4 py-2">Thử lại</button></div>;
+
   const statCards = [
-    { label: 'Tổng doanh thu', value: formatCurrency(tongQuan?.tongDoanhThu), icon: '💰', color: 'from-pink-500 to-rose-500' },
+    { label: 'Doanh thu đơn hoàn tất · hàng', value: formatCurrency(tongQuan?.doanhThuDonHoanTat), icon: '💰', color: 'from-pink-500 to-rose-500' },
+    { label: 'Hoàn tiền hàng đã thực hiện', value: formatCurrency(tongQuan?.hoanTienHang), icon: '↩️', color: 'from-orange-500 to-amber-500' },
+    { label: 'Doanh thu thuần', value: formatCurrency(tongQuan?.tongDoanhThu), icon: '📈', color: 'from-green-500 to-emerald-500' },
+    { label: 'Tiền khách đã thanh toán', value: formatCurrency(tongQuan?.tongKhachDaThanhToan), icon: '💳', color: 'from-blue-500 to-cyan-500' },
+    { label: 'COD chờ đối soát', value: formatCurrency(tongQuan?.codChoDoiSoat), icon: '📦', color: 'from-purple-500 to-indigo-500' },
+    { label: 'Shop thực nhận', value: formatCurrency(tongQuan?.tienShopThucNhan), icon: '🏦', color: 'from-teal-500 to-green-500' },
+    { label: 'COD cũ chưa xác minh', value: formatCurrency(tongQuan?.codCuChuaXacMinh), icon: '⚠️', color: 'from-amber-500 to-orange-500' },
+    { label: 'Thanh toán cũ thiếu chứng từ', value: `${formatCurrency(tongQuan?.tienThanhToanCuChuaXacMinh)} · ${tongQuan?.soDonThanhToanCuChuaXacMinh || 0} đơn`, icon: '🔎', color: 'from-slate-500 to-slate-700' },
     { label: 'Tổng đơn hàng', value: tongQuan?.tongDonHang, icon: '📦', color: 'from-purple-500 to-indigo-500' },
     { label: 'Đơn hoàn thành', value: tongQuan?.donHoanThanh, icon: '✅', color: 'from-green-500 to-emerald-500' },
     { label: 'Tổng khách hàng', value: tongQuan?.tongKhachHang, icon: '👥', color: 'from-blue-500 to-cyan-500' },
@@ -79,7 +86,7 @@ export default function BaoCao() {
       <div className="bg-gradient-to-r from-green-50 to-teal-50 rounded-xl p-6 flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">📈 Báo cáo - Thống kê</h1>
-          <p className="text-sm text-gray-500 mt-1">Doanh thu, đơn hàng, sản phẩm bán chạy</p>
+          <p className="text-sm text-gray-500 mt-1">Chỉ số vận hành đồ án; tách doanh thu hàng, thanh toán, COD và phí vận chuyển.</p>
         </div>
         <div className="flex gap-2">
           {PERIOD_OPTIONS.map(o => (
@@ -96,7 +103,7 @@ export default function BaoCao() {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         {statCards.map((s, i) => (
           <div key={i} className="bg-white rounded-xl shadow p-4">
             <div className={`w-10 h-10 rounded-lg bg-gradient-to-r ${s.color} flex items-center justify-center text-lg mb-3`}>
@@ -110,7 +117,8 @@ export default function BaoCao() {
 
       {/* Doanh thu theo ngay */}
       <div className="bg-white rounded-xl shadow p-6">
-        <h2 className="text-lg font-bold text-gray-800 mb-4">📊 Doanh thu {period} ngày gần đây</h2>
+        <h2 className="text-lg font-bold text-gray-800 mb-1">📊 Doanh thu {period} ngày gần đây</h2>
+        <p className="mb-4 text-xs text-gray-500">Theo thời điểm đủ điều kiện đơn hoàn tất và thời điểm hoàn tiền; không gồm phí vận chuyển, không phải báo cáo kế toán/thuế.</p>
         {doanhThu.length === 0 ? (
           <div className="text-center py-8 text-gray-400">Chưa có dữ liệu doanh thu</div>
         ) : (
@@ -126,8 +134,10 @@ export default function BaoCao() {
               <XAxis dataKey="nhanNgay" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000000).toFixed(0)}tr`} />
               <Tooltip formatter={(v: any) => formatCurrency(v)} labelFormatter={(l) => `Ngày ${l}`} />
-              <Area type="monotone" dataKey="doanhThu" stroke="#ec4899" strokeWidth={2}
-                fill="url(#colorDT)" name="Doanh thu" />
+              <Legend />
+              <Area type="monotone" dataKey="doanhThuDonHoanTat" stroke="#ec4899" strokeWidth={2} fill="url(#colorDT)" name="Doanh thu đơn hoàn tất" />
+              <Area type="monotone" dataKey="hoanTienHang" stroke="#f97316" strokeWidth={2} fill="#fff7ed" name="Hoàn tiền hàng" />
+              <Area type="monotone" dataKey="doanhThu" stroke="#0f766e" strokeWidth={2} fill="#ecfdf5" name="Doanh thu thuần" />
             </AreaChart>
           </ResponsiveContainer>
         )}
@@ -219,7 +229,7 @@ export default function BaoCao() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {sp.HinhAnh ? (
-                          <img src={`${IMG}${sp.HinhAnh}`} alt={sp.TenSanPham}
+                          <img src={`${API_ORIGIN}${sp.HinhAnh}`} alt={sp.TenSanPham}
                             className="w-9 h-9 object-cover rounded-lg border"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                         ) : (

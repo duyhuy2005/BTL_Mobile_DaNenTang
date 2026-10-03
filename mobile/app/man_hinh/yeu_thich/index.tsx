@@ -1,122 +1,29 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  ScrollView,
-  TouchableOpacity,
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Alert, FlatList, Image, RefreshControl, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useAuth } from "@/nguon/AuthContext";
+import { useCart } from "@/nguon/CartContext";
+import { yeuThichService } from "@/dich_vu/yeuThich";
+import { gioHangService } from "@/dich_vu/gioHang";
+import { duongDanAnh } from "@/dich_vu/duongDanAnh";
+import type { SanPham } from "@/kieu_du_lieu/SanPham";
 
-const INIT = [
-  { id: 1, name: "Son môi đỏ Cherry", price: "250.000₫" },
-  { id: 2, name: "Kem dưỡng ẩm Hera", price: "350.000₫" },
-  { id: 3, name: "Nước hoa mini", price: "480.000₫" },
-];
-
+type Favorite = SanPham & { MaYeuThich: number; DanhMucDangBan?: number | boolean };
+const money=(n:number)=>`${Number(n||0).toLocaleString("vi-VN")}đ`;
 export default function YeuThichScreen() {
-  const [items, setItems] = useState(INIT);
-  const remove = (id: number) =>
-    setItems((prev) => prev.filter((i) => i.id !== id));
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Yêu thích ({items.length})</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={styles.container}>
-        {items.length === 0 ? (
-          <View style={styles.empty}>
-            <Ionicons name="heart-outline" size={64} color="#f0d0e0" />
-            <Text style={styles.emptyText}>Chưa có sản phẩm yêu thích</Text>
-          </View>
-        ) : (
-          items.map((item) => (
-            <View key={item.id} style={styles.card}>
-              <View style={styles.image} />
-              <View style={styles.info}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.price}>{item.price}</Text>
-                <TouchableOpacity
-                  style={styles.btnAdd}
-                  onPress={() => router.push("/man_hinh/gio_hang")}
-                >
-                  <Ionicons name="cart-outline" size={14} color="#fff" />
-                  <Text style={styles.btnAddText}>Thêm vào giỏ</Text>
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity
-                onPress={() => remove(item.id)}
-                style={styles.heartBtn}
-              >
-                <Ionicons name="heart" size={22} color="#e91e8c" />
-              </TouchableOpacity>
-            </View>
-          ))
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
+  const router=useRouter(); const {token}=useAuth(); const [now,setNow]=useState(()=>Date.now());
+  const [items,setItems]=useState<Favorite[]>([]); const [loading,setLoading]=useState(true); const [refreshing,setRefreshing]=useState(false); const [error,setError]=useState("");
+  const load=useCallback(async(pull=false)=>{if(!token){setItems([]);setLoading(false);return;}pull?setRefreshing(true):setLoading(true);setError("");try{const r=await yeuThichService.layDanhSach(token);setItems(r.data as Favorite[])}catch(e:any){setError(e.message||"Không thể tải danh sách yêu thích")}finally{setLoading(false);setRefreshing(false)}},[token]);
+  useFocusEffect(useCallback(()=>{void load();},[load]));
+  useEffect(()=>{const expiries=items.map(x=>x.newUntil?Date.parse(x.newUntil):NaN).filter(x=>Number.isFinite(x)&&x>Date.now());if(!expiries.length)return;const timer=setTimeout(()=>setNow(Date.now()),Math.min(Math.min(...expiries)-Date.now()+5,2_147_000_000));return()=>clearTimeout(timer)},[items]);
+  const remove=async(id:number)=>{try{await yeuThichService.xoa(id,token!);setItems(p=>p.filter(x=>x.MaSanPham!==id))}catch(e:any){setError(e.message||"Không thể bỏ yêu thích")}};
+  const {refreshCartCount}=useCart();
+  const add=async(item:Favorite)=>{if(Number(item.SoLuong)<=0)return Alert.alert("Hết hàng","Sản phẩm vẫn được lưu yêu thích, nhưng hiện không thể mua.");try{await gioHangService.themSanPham(item.MaSanPham,1,token!);await refreshCartCount();router.push("/man_hinh/gio_hang")}catch(e:any){Alert.alert("Không thể thêm vào giỏ",e.message||"Vui lòng thử lại")}};
+  const open=(item:Favorite)=>{if(!item.TrangThai||!(item.DanhMucDangBan===true||Number(item.DanhMucDangBan)===1))return Alert.alert("Sản phẩm không còn mở bán","Sản phẩm được giữ trong danh sách yêu thích nhưng danh mục hoặc sản phẩm đã ngừng bán.");router.push(`/man_hinh/san_pham/${item.MaSanPham}`)};
+  return <SafeAreaView style={s.safe}><View style={s.header}><TouchableOpacity onPress={()=>router.back()}><Ionicons name="arrow-back" size={23} color="#17372B"/></TouchableOpacity><Text style={s.title}>Sản phẩm yêu thích</Text><View style={{width:24}}/></View>
+    {!token ? <View style={s.state}><Ionicons name="heart-outline" size={55} color="#9CCDB0"/><Text style={s.emptyTitle}>Đăng nhập để đồng bộ yêu thích</Text><Text style={s.muted}>Danh sách của bạn được lưu an toàn trong tài khoản.</Text><TouchableOpacity style={s.primary} onPress={()=>router.push({pathname:"/man_hinh/dang_nhap",params:{next:"/man_hinh/yeu_thich"}})}><Text style={s.primaryText}>Đăng nhập</Text></TouchableOpacity></View> : loading ? <View style={s.state}><ActivityIndicator size="large" color="#08785B"/><Text style={s.muted}>Đang tải danh sách…</Text></View> : error ? <View style={s.state}><Text style={s.error}>{error}</Text><TouchableOpacity style={s.primary} onPress={()=>void load()}><Text style={s.primaryText}>Thử lại</Text></TouchableOpacity></View> : <FlatList data={items} numColumns={2} columnWrapperStyle={s.row} contentContainerStyle={s.list} keyExtractor={x=>String(x.MaSanPham)} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>void load(true)} tintColor="#08785B"/>} ListHeaderComponent={<Text style={s.count}>{items.length} sản phẩm</Text>} ListEmptyComponent={<View style={s.state}><Ionicons name="heart-outline" size={54} color="#A5CBB0"/><Text style={s.emptyTitle}>Chưa có sản phẩm yêu thích</Text><Text style={s.muted}>Chạm biểu tượng trái tim trên sản phẩm để lưu tại đây.</Text></View>} renderItem={({item})=>{const sale=item.DangKhuyenMai&&Number(item.GiaKhuyenMaiHienTai)<Number(item.GiaBan),inStore=!!item.TrangThai&&(item.DanhMucDangBan===true||Number(item.DanhMucDangBan)===1),uri=duongDanAnh(item.HinhAnh),showNew=Boolean(item.isNew&&item.newUntil&&Date.parse(item.newUntil)>now);return <View style={s.card}><TouchableOpacity onPress={()=>open(item)}><View style={s.image}>{uri?<Image source={{uri}} style={s.photo}/>:<Ionicons name="image-outline" size={34} color="#91B99E"/>}{showNew&&<Text style={s.new}>MỚI</Text>}<TouchableOpacity style={s.heart} onPress={()=>void remove(item.MaSanPham)}><Ionicons name="heart" size={20} color="#08785B"/></TouchableOpacity></View><Text style={s.name} numberOfLines={2}>{item.TenSanPham}</Text><Text style={s.sub} numberOfLines={1}>{inStore?item.ThuongHieu||item.TenDanhMuc||"BeautyStore":"Ngừng bán"}</Text><Text style={s.price}>{money(sale?Number(item.GiaKhuyenMaiHienTai):item.GiaBan)}</Text>{sale?<Text style={s.old}>{money(item.GiaBan)}</Text>:null}{Number(item.SoLuong)<=0&&inStore?<Text style={s.out}>Hết hàng</Text>:null}</TouchableOpacity><TouchableOpacity style={[s.add,!inStore||Number(item.SoLuong)<=0?s.disabled:null]} onPress={()=>void add(item)} disabled={!inStore||Number(item.SoLuong)<=0}><Text style={[s.addText,!inStore||Number(item.SoLuong)<=0?s.disabledText:null]}>{!inStore?"Ngừng bán":Number(item.SoLuong)<=0?"Hết hàng":"Thêm vào giỏ"}</Text></TouchableOpacity></View>}} />}
+    <View style={s.tabs}>{[["home-outline","Trang chủ","/man_hinh/trang_chu"],["grid-outline","Danh mục","/man_hinh/danh_muc"],["heart","Yêu thích","/man_hinh/yeu_thich"],["receipt-outline","Đơn hàng","/man_hinh/don_hang"],["person-outline","Tài khoản","/man_hinh/ca_nhan"]].map(([icon,label,path],i)=><TouchableOpacity key={label} style={s.tab} onPress={()=>{if(i!==2)router.push(path as never)}}><Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={21} color={i===2?"#08785B":"#64748B"}/><Text style={[s.tabLabel,i===2&&s.tabActive]}>{label}</Text></TouchableOpacity>)}</View>
+  </SafeAreaView>
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#fff" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  title: { fontSize: 18, fontWeight: "700", color: "#333" },
-  container: { paddingHorizontal: 16, paddingBottom: 32, flexGrow: 1 },
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-  },
-  emptyText: { fontSize: 15, color: "#bbb", marginTop: 12 },
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    marginBottom: 14,
-    padding: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-  },
-  image: {
-    width: 72,
-    height: 72,
-    backgroundColor: "#fce4ec",
-    borderRadius: 10,
-    marginRight: 12,
-  },
-  info: { flex: 1 },
-  name: { fontSize: 14, fontWeight: "600", color: "#333", marginBottom: 4 },
-  price: { fontSize: 14, fontWeight: "700", color: "#e91e8c", marginBottom: 8 },
-  btnAdd: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#7c3aed",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    gap: 4,
-    alignSelf: "flex-start",
-  },
-  btnAddText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  heartBtn: { padding: 6 },
-});
+const s=StyleSheet.create({safe:{flex:1,backgroundColor:"#F7FBF8"},header:{height:58,paddingHorizontal:17,backgroundColor:"#fff",flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderBottomWidth:1,borderColor:"#E8F0EA"},title:{fontSize:17,fontWeight:"900",color:"#17372B"},list:{padding:13,paddingBottom:90},count:{fontSize:12,color:"#647568",marginBottom:12},row:{justifyContent:"space-between",gap:10},card:{width:"48.5%",padding:8,marginBottom:12,borderRadius:16,backgroundColor:"#fff",borderWidth:1,borderColor:"#E7EFE9"},image:{height:148,backgroundColor:"#EEF6F0",borderRadius:12,alignItems:"center",justifyContent:"center",overflow:"hidden"},photo:{width:"100%",height:"100%",resizeMode:"cover"},new:{position:"absolute",left:7,top:7,backgroundColor:"#08785B",color:"#fff",borderRadius:8,paddingHorizontal:7,paddingVertical:4,fontSize:10,fontWeight:"900"},heart:{position:"absolute",right:7,top:7,width:30,height:30,borderRadius:15,backgroundColor:"#fff",alignItems:"center",justifyContent:"center"},name:{fontSize:13,lineHeight:17,fontWeight:"800",color:"#1C382D",marginTop:8,minHeight:34},sub:{fontSize:10,color:"#718096",marginTop:3},price:{fontSize:14,color:"#08785B",fontWeight:"900",marginTop:6},old:{fontSize:10,color:"#94A3B8",textDecorationLine:"line-through"},out:{fontSize:10,color:"#B42318",fontWeight:"800",marginTop:3},add:{height:33,borderRadius:10,backgroundColor:"#08785B",alignItems:"center",justifyContent:"center",marginTop:8},addText:{fontSize:11,color:"#fff",fontWeight:"800"},disabled:{backgroundColor:"#EFF2F0"},disabledText:{color:"#84918A"},state:{flex:1,alignItems:"center",justifyContent:"center",padding:25,gap:10},emptyTitle:{fontSize:16,fontWeight:"800",color:"#18382D",textAlign:"center"},muted:{fontSize:12,color:"#718096",textAlign:"center"},error:{textAlign:"center",color:"#B42318"},primary:{backgroundColor:"#08785B",paddingHorizontal:22,paddingVertical:12,borderRadius:13,marginTop:7},primaryText:{color:"#fff",fontWeight:"800"},tabs:{position:"absolute",bottom:0,left:0,right:0,height:68,backgroundColor:"#fff",borderTopWidth:1,borderColor:"#E5E7EB",flexDirection:"row",justifyContent:"space-around",paddingTop:8},tab:{flex:1,alignItems:"center",gap:3},tabLabel:{fontSize:10,color:"#64748B"},tabActive:{color:"#08785B",fontWeight:"800"}});

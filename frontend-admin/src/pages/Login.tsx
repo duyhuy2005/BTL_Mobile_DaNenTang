@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI } from '../services/api';
+import { API_BASE_URL, authAPI } from '../services/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -19,13 +19,28 @@ export default function Login() {
     try {
       const response = await authAPI.login(formData);
       
-      if (response.data.success) {
-        localStorage.setItem('token', response.data.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.data.user));
-        navigate('/');
+      if (!response.data.success || !response.data.data) {
+        setError(response.data.message || 'Đăng nhập thất bại');
+        return;
       }
+
+      const role = response.data.data.user?.VaiTro;
+      if (role !== 'Admin' && role !== 'NhanVien') {
+        setError('Tài khoản khách hàng chỉ đăng nhập trên ứng dụng BeautyStore, không dùng trang quản trị.');
+        return;
+      }
+
+      localStorage.setItem('token', response.data.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.data.user));
+      navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Đăng nhập thất bại');
+      if (err.response?.data?.message) {
+        setError(err.response.data.message);
+      } else if (err.request) {
+        setError(`Không thể kết nối Backend tại ${API_BASE_URL}. Hãy kiểm tra backend đang chạy và CORS.`);
+      } else {
+        setError('Đăng nhập thất bại, vui lòng thử lại.');
+      }
     } finally {
       setLoading(false);
     }
@@ -42,14 +57,14 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Tên đăng nhập
+              Tên đăng nhập hoặc email
             </label>
             <input
               type="text"
               value={formData.TenDangNhap}
               onChange={(e) => setFormData({ ...formData, TenDangNhap: e.target.value })}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              placeholder="Nhập tên đăng nhập"
+              placeholder="Nhập tên đăng nhập hoặc email"
               required
             />
           </div>

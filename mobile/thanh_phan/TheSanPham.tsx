@@ -1,12 +1,5 @@
 import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  ImageSourcePropType,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SanPham } from "@/kieu_du_lieu/SanPham";
 
@@ -32,9 +25,9 @@ export default function TheSanPham({
       activeOpacity={0.88}
     >
       <View style={styles.imageWrap}>
-        {sanPham.hinhAnh ? (
+        {sanPham.HinhAnh ? (
           <Image
-            source={{ uri: sanPham.hinhAnh }}
+            source={{ uri: sanPham.HinhAnh }}
             style={styles.image}
             resizeMode="cover"
           />
@@ -48,38 +41,21 @@ export default function TheSanPham({
             color={isFavorite ? "#e91e8c" : "#ccc"}
           />
         </TouchableOpacity>
-        {sanPham.giamGia && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>-{sanPham.giamGia}%</Text>
-          </View>
-        )}
       </View>
       <View style={styles.info}>
         <Text style={styles.name} numberOfLines={2}>
-          {sanPham.tenSanPham}
+          {sanPham.TenSanPham}
         </Text>
         <View style={styles.priceRow}>
           <Text style={styles.price}>
-            {sanPham.gia.toLocaleString("vi-VN")}₫
+            {sanPham.GiaBan.toLocaleString("vi-VN")}₫
           </Text>
-          {sanPham.giaGoc && (
-            <Text style={styles.priceOld}>
-              {sanPham.giaGoc.toLocaleString("vi-VN")}₫
-            </Text>
-          )}
         </View>
         <View style={styles.starsRow}>
           {[1, 2, 3, 4, 5].map((s) => (
-            <Ionicons
-              key={s}
-              name="star"
-              size={11}
-              color={s <= (sanPham.danhGia ?? 0) ? "#ffc107" : "#eee"}
-            />
+            <Ionicons key={s} name="star" size={11} color="#eee" />
           ))}
-          <Text style={styles.reviewCount}>
-            ({sanPham.soLuongDanhGia ?? 0})
-          </Text>
+          <Text style={styles.reviewCount}>(chưa có đánh giá)</Text>
         </View>
       </View>
       <TouchableOpacity style={styles.cartBtn} onPress={onAddToCart}>

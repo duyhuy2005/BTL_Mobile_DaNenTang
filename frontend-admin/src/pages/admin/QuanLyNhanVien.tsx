@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import { PlusIcon, PencilIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { employeesAPI } from '../../services/api';
 
 interface StaffMember {
   MaNhanVien: number;
@@ -23,7 +23,6 @@ interface FormData {
   TrangThai: number;
 }
 
-const API = 'http://localhost:3000/api';
 
 export default function QuanLyNhanVien() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -42,16 +41,10 @@ export default function QuanLyNhanVien() {
     TrangThai: 1
   });
 
-  const token = localStorage.getItem('token');
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchStaff = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API}/nhanvien`, {
-        headers,
-        params: { page: pagination.page, limit: pagination.limit, search: searchTerm }
-      });
+      const res = await employeesAPI.getAll({ page: pagination.page, limit: pagination.limit, search: searchTerm });
       setStaff(res.data.data || []);
       if (res.data.pagination) setPagination(res.data.pagination);
     } catch (err) {
@@ -89,10 +82,10 @@ export default function QuanLyNhanVien() {
     }
     try {
       if (editingId) {
-        await axios.put(`${API}/nhanvien/${editingId}`, formData, { headers });
+        await employeesAPI.update(editingId, formData);
         alert('Cập nhật nhân viên thành công!');
       } else {
-        await axios.post(`${API}/nhanvien`, formData, { headers });
+        await employeesAPI.create(formData);
         alert('Thêm nhân viên thành công!');
       }
       setShowModal(false);
@@ -105,7 +98,7 @@ export default function QuanLyNhanVien() {
   const handleDelete = async (id: number, name: string) => {
     if (!confirm(`Bạn có chắc chắn muốn xóa nhân viên "${name}"?`)) return;
     try {
-      await axios.delete(`${API}/nhanvien/${id}`, { headers });
+      await employeesAPI.delete(id);
       alert('Xóa nhân viên thành công!');
       fetchStaff();
     } catch (err: any) {

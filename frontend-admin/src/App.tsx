@@ -11,6 +11,10 @@ import BaoCao from './pages/admin/BaoCao';
 
 // Pages Nhân viên - riêng cho Staff
 import TongQuanNhanVien from './pages/nhanvien/TongQuan';
+import SanPhamNhanVien from './pages/nhanvien/SanPhamNhanVien';
+import KhoHangNhanVien from './pages/nhanvien/KhoHangNhanVien';
+import KhachHangNhanVien from './pages/nhanvien/KhachHangNhanVien';
+import HoSoCaNhan from './pages/nhanvien/HoSoCaNhan';
 
 // Pages Chung - cả Admin và Staff
 import SanPham from './pages/chung/SanPham';
@@ -26,17 +30,31 @@ import ChiTietHoanTra from './pages/chung/ChiTietHoanTra';
 import KhachHang from './pages/chung/KhachHang';
 import Login from './pages/Login';
 
-function PrivateRoute({ children }: { children: React.ReactNode }) {
+const BACK_OFFICE_ROLES = ['Admin', 'NhanVien'];
+
+function storedUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function canUseBackOffice() {
   const token = localStorage.getItem('token');
-  return token ? <Layout>{children}</Layout> : <Navigate to="/login" />;
+  return Boolean(token && BACK_OFFICE_ROLES.includes(storedUser().VaiTro));
+}
+
+function PrivateRoute({ children }: { children: React.ReactNode }) {
+  return canUseBackOffice() ? <Layout>{children}</Layout> : <Navigate to="/login" />;
 }
 
 // Admin Only Route - chỉ Admin mới truy cập được
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = storedUser();
   
-  if (!token) return <Navigate to="/login" />;
+  if (!token || !BACK_OFFICE_ROLES.includes(user.VaiTro)) return <Navigate to="/login" />;
   if (user.VaiTro !== 'Admin') {
     return <Navigate to="/" />;
   }
@@ -46,7 +64,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 // Dashboard Route - phân biệt theo vai trò
 function DashboardRoute() {
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  if (!canUseBackOffice()) return <Navigate to="/login" />;
+  const user = storedUser();
   const isAdmin = user.VaiTro === 'Admin';
   
   return (
@@ -54,6 +73,24 @@ function DashboardRoute() {
       {isAdmin ? <TongQuanAdmin /> : <TongQuanNhanVien />}
     </Layout>
   );
+}
+
+function ProductsRoute() {
+  return storedUser().VaiTro === 'Admin' ? <SanPham /> : <SanPhamNhanVien />;
+}
+
+function WarehouseRoute() {
+  return storedUser().VaiTro === 'Admin' ? <KhoHang /> : <KhoHangNhanVien />;
+}
+
+function CustomersRoute() {
+  return storedUser().VaiTro === 'Admin' ? <KhachHang /> : <KhachHangNhanVien />;
+}
+
+function EmployeeProfileRoute() {
+  if (!canUseBackOffice()) return <Navigate to="/login" />;
+  if (storedUser().VaiTro !== 'NhanVien') return <Navigate to="/" />;
+  return <Layout><HoSoCaNhan /></Layout>;
 }
 
 export default function App() {
@@ -66,9 +103,9 @@ export default function App() {
         <Route path="/" element={<DashboardRoute />} />
         
         {/* Routes cho cả Admin và Staff */}
-        <Route path="/products" element={<PrivateRoute><SanPham /></PrivateRoute>} />
+        <Route path="/products" element={<PrivateRoute><ProductsRoute /></PrivateRoute>} />
         <Route path="/categories" element={<PrivateRoute><DanhMuc /></PrivateRoute>} />
-        <Route path="/warehouse" element={<PrivateRoute><KhoHang /></PrivateRoute>} />
+        <Route path="/warehouse" element={<PrivateRoute><WarehouseRoute /></PrivateRoute>} />
         <Route path="/invoices" element={<PrivateRoute><DonHang /></PrivateRoute>} />
         <Route path="/invoices/:id" element={<PrivateRoute><ChiTietDonHang /></PrivateRoute>} />
         <Route path="/invoices/create" element={<PrivateRoute><TaoDonHang /></PrivateRoute>} />
@@ -76,12 +113,14 @@ export default function App() {
         <Route path="/deliveries/:id" element={<PrivateRoute><ChiTietGiaoHang /></PrivateRoute>} />
         <Route path="/returns" element={<PrivateRoute><HoanTra /></PrivateRoute>} />
         <Route path="/returns/:id" element={<PrivateRoute><ChiTietHoanTra /></PrivateRoute>} />
-        <Route path="/customers" element={<PrivateRoute><KhachHang /></PrivateRoute>} />
+        <Route path="/customers" element={<PrivateRoute><CustomersRoute /></PrivateRoute>} />
+        <Route path="/profile" element={<EmployeeProfileRoute />} />
         
         {/* Routes chỉ dành cho Admin */}
         <Route path="/staff" element={<AdminRoute><QuanLyNhanVien /></AdminRoute>} />
         <Route path="/promotions" element={<AdminRoute><KhuyenMai /></AdminRoute>} />
-        <Route path="/vouchers" element={<AdminRoute><Voucher /></AdminRoute>} />
+        <Route path="/promotions/vouchers" element={<AdminRoute><Voucher /></AdminRoute>} />
+        <Route path="/vouchers" element={<Navigate to="/promotions/vouchers" replace />} />
         <Route path="/reviews" element={<AdminRoute><DanhGia /></AdminRoute>} />
         <Route path="/reports" element={<AdminRoute><BaoCao /></AdminRoute>} />
       </Routes>

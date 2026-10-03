@@ -1,6 +1,7 @@
-import axios from 'axios';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { shippingAPI } from '../../services/api';
+import type { ShippingAction } from '../../services/api';
 
 interface DeliveryDetail {
   MaGiaoHang: number;
@@ -33,17 +34,27 @@ export default function DeliveryDetail() {
   const [loading, setLoading] = useState(true);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [newStatus, setNewStatus] = useState('');
+  const [currentStatus, setCurrentStatus] = useState('');
   const [statusNote, setStatusNote] = useState('');
 
   const fetchDeliveryDetail = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`http://localhost:3000/api/giaohang/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const response = await shippingAPI.getById(Number(id));
+      const item = response.data.data;
+      const labels: Record<string, string> = { CHO_LAY_HANG: 'Chờ giao', DA_LAY_HANG: 'Đã lấy hàng', DANG_VAN_CHUYEN: 'Đang vận chuyển', DANG_GIAO: 'Đang giao', GIAO_THANH_CONG: 'Đã giao', GIAO_THAT_BAI: 'Giao thất bại', DA_HUY_VAN_DON: 'Đã hủy' };
+      setDelivery({
+        MaGiaoHang: item.Id, MaHoaDon: item.HoaDonId, TenKhachHang: item.TenNguoiNhan,
+        SoDienThoai: item.SoDienThoaiNhan, SoDienThoaiKH: item.SoDienThoaiNhan,
+        DiaChi: item.DiaChiGiaoHang, DiaChiGiaoHang: item.DiaChiGiaoHang,
+        DonViVanChuyen: item.TenDonVi, MaVanDon: item.MaVanDon,
+        NgayGiao: item.NgayDuKienGiao, PhiVanChuyen: item.PhiVanChuyen,
+        TrangThai: labels[item.TrangThai] || item.TrangThai,
+        GhiChu: item.LyDoThatBai || item.GhiChuDonHang || '', NgayLap: item.CreatedAt,
+        TongTien: item.TongTien, chiTiet: (item.SanPham || []).map((line: any) => ({ ...line, ThanhTien: Number(line.DonGia || 0) * Number(line.SoLuong || 0) })),
       });
-      setDelivery(response.data.data);
-      setNewStatus(response.data.data.TrangThai);
+      setCurrentStatus(item.TrangThai);
+      setNewStatus('');
     } catch (error) {
       console.error('Lỗi tải chi tiết giao hàng:', error);
       alert('Không thể tải thông tin giao hàng');
@@ -53,18 +64,18 @@ export default function DeliveryDetail() {
   };
 
   const handleUpdateStatus = async () => {
-    if (!newStatus) {
-      alert('Vui lòng chọn trạng thái');
-      return;
-    }
-
     try {
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `http://localhost:3000/api/giaohang/${id}/status`,
-        { TrangThai: newStatus, GhiChu: statusNote },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const current = currentStatus;
+      const transitions: Record<string, Record<string, ShippingAction>> = {
+        CHO_LAY_HANG: { DA_LAY_HANG: 'picked_up' },
+        DA_LAY_HANG: { DANG_VAN_CHUYEN: 'in_transit' },
+        DANG_VAN_CHUYEN: { DANG_GIAO: 'out_for_delivery' },
+        DANG_GIAO: { GIAO_THANH_CONG: 'delivered', GIAO_THAT_BAI: 'failed' },
+      };
+      const action = transitions[current]?.[newStatus];
+      if (!action) { alert('Trạng thái tiếp theo không hợp lệ với tiến trình vận chuyển hiện tại'); return; }
+      if (action === 'failed' && !statusNote.trim()) { alert('Vui lòng nhập lý do giao thất bại'); return; }
+      await shippingAPI.action(Number(id), { action, reason: action === 'failed' ? statusNote : undefined, note: statusNote });
       alert('Cập nhật trạng thái thành công');
       setShowStatusModal(false);
       fetchDeliveryDetail();
@@ -81,6 +92,8 @@ export default function DeliveryDetail() {
       case 'Đang giao':
         return 'bg-blue-100 text-blue-800 border-blue-300';
       case 'Chờ giao':
+      case 'Đã lấy hàng':
+      case 'Đang vận chuyển':
         return 'bg-yellow-100 text-yellow-800 border-yellow-300';
       case 'Giao thất bại':
         return 'bg-red-100 text-red-800 border-red-300';
@@ -388,11 +401,12 @@ export default function DeliveryDetail() {
                     onChange={(e) => setNewStatus(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                   >
-                    <option value="Chờ giao">Chờ giao</option>
-                    <option value="Đang giao">Đang giao</option>
-                    <option value="Đã giao">Đã giao</option>
-                    <option value="Giao thất bại">Giao thất bại</option>
-                    <option value="Đã hủy">Đã hủy</option>
+                    <option value="">Chọn trạng thái tiếp theo</option>
+                    <option value="DA_LAY_HANG">Đã lấy hàng</option>
+                    <option value="DANG_VAN_CHUYEN">Đang vận chuyển</option>
+                    <option value="DANG_GIAO">Đang giao</option>
+                    <option value="GIAO_THANH_CONG">Đã giao thành công</option>
+                    <option value="GIAO_THAT_BAI">Giao thất bại</option>
                   </select>
                 </div>
                 

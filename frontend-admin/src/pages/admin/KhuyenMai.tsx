@@ -1,294 +1,47 @@
-import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { PencilIcon, TrashIcon, XMarkIcon, TagIcon } from '@heroicons/react/24/outline';
+import { useCallback, useEffect, useState } from 'react';
+import { API_BASE_URL, categoriesAPI, productsAPI, promotionsAPI } from '../../services/api';
 
-const API = 'http://localhost:3000/api';
-const IMG = 'http://localhost:3000';
+type Row = { Id:number; MaChuongTrinh:string; TenChuongTrinh:string; MoTa?:string; Banner?:string; HinhAnhSanPham?:string; TenSanPhamDaiDien?:string; LoaiKhuyenMai:string; GiaTri:number; GiamToiDa?:number|null; DonToiThieu:number; NgayBatDau:string; NgayKetThuc:string; TongLuot?:number|null; LuotDaGiu:number; LuotDaSuDung:number; DoUuTien:number; PhamVi:string; TrangThai:string; TrangThaiHienTai:string; ChoPhepKetHopVoucher:boolean; TuDongKichHoat:boolean };
+const kinds = [['GIAM_PHAN_TRAM','Giảm theo phần trăm'],['GIAM_CO_DINH','Giảm cố định'],['DONG_GIA','Đồng giá'],['MUA_X_TANG_Y','Mua X tặng Y'],['COMBO','Combo']];
+const states:Record<string,string>={NHAP:'Bản nháp',CHO_AP_DUNG:'Sắp diễn ra',DANG_HOAT_DONG:'Đang hoạt động',TAM_DUNG:'Tạm dừng',HET_SO_LUONG:'Hết suất',KET_THUC:'Kết thúc',DA_HUY:'Đã hủy'};
+const money=(v:any)=>`${Number(v||0).toLocaleString('vi-VN')}đ`;
+const localDate=(v?:string)=>{const d=v?new Date(v):new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};
+const blank=()=>({MaChuongTrinh:'',TenChuongTrinh:'',MoTa:'',Banner:'',LoaiKhuyenMai:'GIAM_PHAN_TRAM',GiaTri:20,GiamToiDa:'',DonToiThieu:0,NgayBatDau:localDate(),NgayKetThuc:localDate(new Date(Date.now()+7*86400000).toISOString()),TongLuot:'',MoiKhachToiDa:'',DoUuTien:0,PhamVi:'TOAN_BO',DoiTuongApDung:[] as string[],ChoPhepKetHopVoucher:true,TuDongKichHoat:false,QuaTang:[] as any[],Combo:[] as any[]});
+const unwrap=(r:any)=>r?.data?.data??r?.data??[];
+const imageUrl=(path?:string)=>!path?undefined:/^https?:\/\//.test(path)?path:`${API_BASE_URL.replace(/\/api$/,'')}/uploads/products/${path.split(/[\\/]/).pop()}`;
 
-const formatCurrency = (v: number) =>
-  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v || 0);
-
-interface Product {
-  MaKhuyenMai: number;
-  TenSanPham: string;
-  GiaBan: number;
-  GiaKhuyenMai: number;
-  PhanTramGiam: number;
-  HinhAnh: string;
-  TrangThai: string;
+export default function KhuyenMai(){
+ const [rows,setRows]=useState<Row[]>([]),[stats,setStats]=useState<any>({}),[page,setPage]=useState(1),[total,setTotal]=useState(0),[search,setSearch]=useState(''),[tab,setTab]=useState(''),[typeFilter,setTypeFilter]=useState(''),[scopeFilter,setScopeFilter]=useState(''),[fromDate,setFromDate]=useState(''),[toDate,setToDate]=useState(''),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ const [open,setOpen]=useState(false),[step,setStep]=useState(1),[form,setForm]=useState<any>(blank()),[editId,setEditId]=useState<number|null>(null),[saving,setSaving]=useState(false),[notice,setNotice]=useState('');
+ const [categories,setCategories]=useState<any[]>([]),[products,setProducts]=useState<any[]>([]),[detail,setDetail]=useState<any>(null),[conflicts,setConflicts]=useState<any[]>([]),[orders,setOrders]=useState<any[]>([]),[effect,setEffect]=useState<any>(null);
+ const load=useCallback(async()=>{setLoading(true);setError('');try{const [list,summary]=await Promise.all([promotionsAPI.getAll({page,limit:8,search:search||undefined,trangThai:tab||undefined,loai:typeFilter||undefined,phamVi:scopeFilter||undefined,tuNgay:fromDate||undefined,denNgay:toDate||undefined}),promotionsAPI.getStats()]);setRows(unwrap(list));setTotal(list.data?.pagination?.total||0);setStats(unwrap(summary)||{});}catch(e:any){setError(e.response?.data?.message||'Không thể tải chương trình khuyến mại. Kiểm tra backend và quyền Admin.');}finally{setLoading(false);}},[page,search,tab,typeFilter,scopeFilter,fromDate,toDate]);
+ useEffect(()=>{load()},[load]);
+ useEffect(()=>{Promise.all([categoriesAPI.getAll(),productsAPI.getAll({page:1,limit:100})]).then(([c,p])=>{setCategories(unwrap(c));setProducts(unwrap(p));}).catch(()=>{});},[]);
+ const totalPages=Math.max(1,Math.ceil(total/8));
+ const startNew=()=>{setEditId(null);setForm(blank());setStep(1);setNotice('');setOpen(true)};
+ const edit=async(row:Row)=>{try{const d=unwrap(await promotionsAPI.getById(row.Id));setEditId(row.Id);setForm({...blank(),...d,NgayBatDau:localDate(d.NgayBatDau),NgayKetThuc:localDate(d.NgayKetThuc),GiamToiDa:d.GiamToiDa??'',TongLuot:d.TongLuot??'',MoiKhachToiDa:d.MoiKhachToiDa??'',DoiTuongApDung:(d.DoiTuongApDung||[]).map(String)});setStep(1);setOpen(true);}catch(e:any){setError(e.response?.data?.message||'Không thể tải chi tiết chương trình')}};
+ const update=(key:string,value:any)=>setForm((f:any)=>({...f,[key]:value}));
+ const save=async()=>{setSaving(true);setNotice('');try{const payload={...form,GiaTri:Number(form.GiaTri),GiamToiDa:form.GiamToiDa===''?null:Number(form.GiamToiDa),DonToiThieu:Number(form.DonToiThieu||0),TongLuot:form.TongLuot===''?null:Number(form.TongLuot),MoiKhachToiDa:form.MoiKhachToiDa===''?null:Number(form.MoiKhachToiDa),DoUuTien:Number(form.DoUuTien||0)};const r=editId?await promotionsAPI.update(editId,payload):await promotionsAPI.create(payload);const id=editId||r.data?.data?.Id;if(!editId&&!form.TuDongKichHoat){setNotice('Đã lưu bản nháp. Kích hoạt khi sẵn sàng.');}else if(id&&form.TuDongKichHoat){await promotionsAPI.activate(id)}setOpen(false);await load()}catch(e:any){setNotice(e.response?.data?.message||'Không lưu được chương trình')}finally{setSaving(false)}};
+ const inspect=async(row:Row)=>{setDetail(row);try{const [c,o,e]=await Promise.all([promotionsAPI.conflicts(row.Id),promotionsAPI.orders(row.Id),promotionsAPI.effectiveness(row.Id)]);setConflicts(unwrap(c));setOrders(unwrap(o));setEffect(unwrap(e));}catch{setConflicts([]);setOrders([]);setEffect(null)}};
+ const action=async(row:Row,key:string)=>{try{if(key==='copy')await promotionsAPI.copy(row.Id);else if(key==='activate')await promotionsAPI.activate(row.Id);else if(key==='pause')await promotionsAPI.pause(row.Id);else if(key==='end')await promotionsAPI.end(row.Id);else await promotionsAPI.cancel(row.Id);await load()}catch(e:any){setError(e.response?.data?.message||'Không thể cập nhật trạng thái')}};
+ const discountText=(r:Row)=>r.LoaiKhuyenMai==='GIAM_PHAN_TRAM'?`Giảm ${r.GiaTri}%${r.GiamToiDa?`, tối đa ${money(r.GiamToiDa)}`:''}`:r.LoaiKhuyenMai==='DONG_GIA'?`Đồng giá ${money(r.GiaTri)}`:r.LoaiKhuyenMai==='GIAM_CO_DINH'?`Giảm ${money(r.GiaTri)}`:r.LoaiKhuyenMai==='COMBO'?`Combo ${money(r.GiaTri)}`:'Mua X tặng Y';
+ return <div className="min-h-screen bg-slate-50 p-5 lg:p-7 text-slate-800">
+  <div className="flex flex-wrap justify-between items-end gap-4 mb-5"><div><div className="text-xs text-slate-500 mb-2">Khuyến mãi　/　<span className="text-slate-800">Chương trình khuyến mại</span></div><h1 className="text-3xl font-bold">Chương trình khuyến mại</h1><p className="text-slate-500 mt-1">Thiết lập giảm giá tự động, combo và quà tặng</p></div><button onClick={startNew} className="rounded-lg bg-pink-600 text-white px-5 py-3 font-semibold shadow hover:bg-pink-700">＋ Tạo chương trình</button></div>
+  {error&&<div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 flex justify-between">{error}<button onClick={load} className="underline">Thử lại</button></div>}
+  <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-5">{[['🟢','Đang hoạt động',stats.DangHoatDong],['🔵','Sắp diễn ra',stats.SapDienRa],['⚑','Đã kết thúc',stats.DaKetThuc],['📦','Sản phẩm đang giảm',stats.SanPhamDangGiam],['▥','Doanh thu khuyến mại',money(stats.DoanhThuKhuyenMai)]].map(([icon,label,value]:any)=><div key={label} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100"><div className="text-sm text-slate-500">{icon}　{label}</div><div className="text-2xl font-bold mt-1">{value??'—'}</div></div>)}</div>
+  <div className="bg-white rounded-xl shadow-sm border border-slate-100">
+   <div className="flex gap-6 px-5 border-b overflow-x-auto">{[['','Tất cả'],['DANG_HOAT_DONG','Đang hoạt động'],['CHO_AP_DUNG','Sắp diễn ra'],['TAM_DUNG','Tạm dừng'],['KET_THUC','Kết thúc']].map(([v,t])=><button key={v} onClick={()=>{setTab(v);setPage(1)}} className={`py-4 text-sm whitespace-nowrap border-b-2 ${tab===v?'border-pink-600 text-pink-600 font-semibold':'border-transparent text-slate-500'}`}>{t}</button>)}</div>
+   <div className="p-4 flex flex-wrap gap-3"><input className="border rounded-lg px-3 py-2 flex-1 min-w-56" placeholder="⌕  Tìm mã hoặc tên chương trình" value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}}/><select className="border rounded-lg px-3 py-2" value={typeFilter} onChange={e=>{setTypeFilter(e.target.value);setPage(1)}}><option value="">Loại khuyến mại</option>{kinds.map(([k,l])=><option key={k} value={k}>{l}</option>)}</select><select className="border rounded-lg px-3 py-2" value={scopeFilter} onChange={e=>{setScopeFilter(e.target.value);setPage(1)}}><option value="">Phạm vi</option>{[['TOAN_BO','Toàn bộ'],['DANH_MUC','Danh mục'],['SAN_PHAM','Sản phẩm'],['THUONG_HIEU','Thương hiệu']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select><input aria-label="Từ ngày" type="date" className="border rounded-lg px-2 py-2" value={fromDate} onChange={e=>{setFromDate(e.target.value);setPage(1)}}/><input aria-label="Đến ngày" type="date" className="border rounded-lg px-2 py-2" value={toDate} onChange={e=>{setToDate(e.target.value);setPage(1)}}/><button onClick={load} className="border border-pink-500 text-pink-600 px-4 rounded-lg">☷ Bộ lọc</button></div>
+   <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-slate-500"><tr>{['Mã chương trình','Tên chương trình','Loại','Phạm vi','Thời gian','Đã dùng / Giới hạn','Trạng thái','Thao tác'].map(t=><th key={t} className="px-3 py-3 text-left whitespace-nowrap">{t}</th>)}</tr></thead><tbody>{loading?<tr><td colSpan={8} className="text-center py-12">Đang tải dữ liệu…</td></tr>:!rows.length?<tr><td colSpan={8} className="text-center py-12 text-slate-500">Chưa có chương trình khuyến mại</td></tr>:rows.map(r=><tr key={r.Id} className="border-t hover:bg-pink-50/30"><td className="px-3 py-3 font-semibold">{r.MaChuongTrinh}</td><td className="px-3 py-3"><div className="flex gap-2 items-center"><div className="w-12 h-12 rounded-lg overflow-hidden bg-pink-50 shrink-0">{imageUrl(r.HinhAnhSanPham)?<img className="w-full h-full object-cover" src={imageUrl(r.HinhAnhSanPham)} alt={r.TenSanPhamDaiDien||''} onError={e=>{e.currentTarget.style.display='none'}}/>:<div className="w-full h-full grid place-items-center text-pink-300">✿</div>}</div><div><div className="font-semibold">{r.TenChuongTrinh}</div><div className="text-xs text-slate-400">{r.TenSanPhamDaiDien||r.MoTa||'—'}</div></div></div></td><td className="px-3 py-3"><span className="rounded bg-pink-50 text-pink-700 px-2 py-1">{discountText(r)}</span></td><td className="px-3 py-3">{r.PhamVi==='TOAN_BO'?'Toàn bộ':r.PhamVi}</td><td className="px-3 py-3 whitespace-nowrap">{new Date(r.NgayBatDau).toLocaleString('vi-VN')}<br/>– {new Date(r.NgayKetThuc).toLocaleString('vi-VN')}</td><td className="px-3 py-3">{r.LuotDaSuDung+r.LuotDaGiu} / {r.TongLuot??'∞'}<div className="h-1.5 bg-slate-100 rounded mt-2"><div className="h-full bg-emerald-500 rounded" style={{width:`${r.TongLuot?Math.min(100,(r.LuotDaSuDung+r.LuotDaGiu)*100/r.TongLuot):0}%`}}/></div></td><td className="px-3 py-3"><span className={`px-2 py-1 rounded-full text-xs ${r.TrangThaiHienTai==='DANG_HOAT_DONG'?'bg-green-100 text-green-700':'bg-slate-100 text-slate-600'}`}>{states[r.TrangThaiHienTai]||states[r.TrangThai]||r.TrangThai}</span></td><td className="px-3 py-3"><div className="flex gap-1"><button onClick={()=>inspect(r)} className="border rounded px-2 py-1 text-pink-600">Xem</button><button onClick={()=>edit(r)} className="border rounded px-2 py-1">Sửa</button><select aria-label="Thao tác" className="border rounded px-1" value="" onChange={e=>e.target.value&&action(r,e.target.value)}><option value="">⋮</option><option value="copy">Sao chép</option><option value="activate">Kích hoạt</option><option value="pause">Tạm dừng</option><option value="end">Kết thúc sớm</option><option value="cancel">Hủy</option></select></div></td></tr>)}</tbody></table></div>
+   <div className="flex justify-between items-center px-4 py-3 text-sm text-slate-500 border-t"><span>Tổng {total} chương trình</span><div className="flex gap-2"><button disabled={page<=1} onClick={()=>setPage(page-1)} className="border rounded px-3 py-1 disabled:opacity-40">Trước</button><span className="px-2 py-1">{page} / {totalPages}</span><button disabled={page>=totalPages} onClick={()=>setPage(page+1)} className="border rounded px-3 py-1 disabled:opacity-40">Sau</button></div></div>
+  </div>
+  {open&&<div className="fixed inset-0 z-40 bg-slate-950/30 flex justify-end"><div className="bg-white w-full max-w-[520px] h-full overflow-y-auto shadow-2xl"><div className="sticky top-0 bg-white border-b p-4 flex justify-between font-bold text-lg z-10">{editId?'Chỉnh sửa chương trình':'Tạo chương trình'}<button onClick={()=>setOpen(false)}>×</button></div><div className="px-5 py-3 flex justify-between text-xs text-center">{['Thông tin','Ưu đãi','Phạm vi'].map((x,i)=><button key={x} onClick={()=>setStep(i+1)} className={step===i+1?'text-pink-600 font-bold':'text-slate-400'}><span className="block mx-auto mb-1 rounded-full w-7 h-7 leading-7 bg-slate-100">{i+1}</span>{x}</button>)}</div><div className="p-5 space-y-4">
+   {step===1&&<><h3 className="font-bold border-l-4 border-pink-500 pl-2">Thông tin cơ bản</h3><Field label="Mã chương trình" value={form.MaChuongTrinh} change={(v:string)=>update('MaChuongTrinh',v)} required/><Field label="Tên chương trình" value={form.TenChuongTrinh} change={(v:string)=>update('TenChuongTrinh',v)} required/><label className="block text-sm">Mô tả<textarea className="mt-1 w-full border rounded-lg p-2" maxLength={500} value={form.MoTa} onChange={e=>update('MoTa',e.target.value)}/></label><Field label="Banner (đường dẫn ảnh)" value={form.Banner} change={(v:string)=>update('Banner',v)}/><label className="block text-sm">Loại khuyến mại<select className="mt-1 w-full border rounded-lg p-2" value={form.LoaiKhuyenMai} onChange={e=>update('LoaiKhuyenMai',e.target.value)}>{kinds.map(([v,t])=><option key={v} value={v}>{t}</option>)}</select></label></>}
+   {step===2&&<><h3 className="font-bold border-l-4 border-pink-500 pl-2">Thiết lập ưu đãi</h3>{form.LoaiKhuyenMai==='MUA_X_TANG_Y'?<>{form.QuaTang.map((g:any,i:number)=><div key={i} className="grid grid-cols-2 gap-2 border p-3 rounded"><select className="border rounded p-2" value={g.MaSanPhamMua||''} onChange={e=>update('QuaTang',form.QuaTang.map((x:any,j:number)=>j===i?{...x,MaSanPhamMua:+e.target.value}:x))}><option value="">Sản phẩm mua</option>{products.map((p:any)=><option key={p.MaSanPham} value={p.MaSanPham}>{p.TenSanPham}</option>)}</select><Field label="Số lượng X" value={g.SoLuongMua||1} change={(v:any)=>update('QuaTang',form.QuaTang.map((x:any,j:number)=>j===i?{...x,SoLuongMua:+v}:x))}/><select className="border rounded p-2" value={g.MaSanPhamTang||''} onChange={e=>update('QuaTang',form.QuaTang.map((x:any,j:number)=>j===i?{...x,MaSanPhamTang:+e.target.value}:x))}><option value="">Sản phẩm tặng</option>{products.map((p:any)=><option key={p.MaSanPham} value={p.MaSanPham}>{p.TenSanPham}</option>)}</select><Field label="Số lượng Y" value={g.SoLuongTang||1} change={(v:any)=>update('QuaTang',form.QuaTang.map((x:any,j:number)=>j===i?{...x,SoLuongTang:+v}:x))}/><button onClick={()=>update('QuaTang',form.QuaTang.filter((_:any,j:number)=>i!==j))} className="text-red-500">Bỏ dòng</button></div>)}<button className="text-pink-600" onClick={()=>update('QuaTang',[...form.QuaTang,{SoLuongMua:1,SoLuongTang:1}])}>＋ Thêm điều kiện mua/tặng</button></>:form.LoaiKhuyenMai==='COMBO'?<><Field label="Giá combo" value={form.GiaTri} change={(v:string)=>update('GiaTri',v)} required/>{form.Combo.map((c:any,i:number)=><div key={i} className="flex gap-2"><select className="flex-1 border rounded p-2" value={c.MaSanPham||''} onChange={e=>update('Combo',form.Combo.map((x:any,j:number)=>j===i?{...x,MaSanPham:+e.target.value}:x))}><option value="">Chọn sản phẩm combo</option>{products.map((p:any)=><option key={p.MaSanPham} value={p.MaSanPham}>{p.TenSanPham}</option>)}</select><input type="number" min="1" className="w-20 border rounded p-2" value={c.SoLuong||1} onChange={e=>update('Combo',form.Combo.map((x:any,j:number)=>j===i?{...x,SoLuong:+e.target.value}:x))}/><button onClick={()=>update('Combo',form.Combo.filter((_:any,j:number)=>j!==i))}>×</button></div>)}<button className="text-pink-600" onClick={()=>update('Combo',[...form.Combo,{SoLuong:1}])}>＋ Thêm sản phẩm</button></>:<><Field label={form.LoaiKhuyenMai==='DONG_GIA'?'Giá đồng giá':'Giá trị giảm'} value={form.GiaTri} change={(v:string)=>update('GiaTri',v)} required/><Field label="Giảm tối đa (tùy chọn)" value={form.GiamToiDa} change={(v:string)=>update('GiamToiDa',v)}/></>}<Field label="Đơn tối thiểu" value={form.DonToiThieu} change={(v:string)=>update('DonToiThieu',v)}/><div className="grid grid-cols-2 gap-3"><Field label="Thời gian bắt đầu" type="datetime-local" value={form.NgayBatDau} change={(v:string)=>update('NgayBatDau',v)} required/><Field label="Thời gian kết thúc" type="datetime-local" value={form.NgayKetThuc} change={(v:string)=>update('NgayKetThuc',v)} required/></div><div className="grid grid-cols-3 gap-2"><Field label="Tổng lượt (trống=không giới hạn)" value={form.TongLuot} change={(v:string)=>update('TongLuot',v)}/><Field label="Mỗi khách tối đa" value={form.MoiKhachToiDa} change={(v:string)=>update('MoiKhachToiDa',v)}/><Field label="Độ ưu tiên" value={form.DoUuTien} change={(v:string)=>update('DoUuTien',v)}/></div><div className="bg-pink-50 rounded p-3 text-sm">Xem trước: {form.LoaiKhuyenMai==='GIAM_PHAN_TRAM'?`Giảm ${form.GiaTri}%`:form.LoaiKhuyenMai==='GIAM_CO_DINH'?`Giảm ${money(form.GiaTri)}`:form.LoaiKhuyenMai==='DONG_GIA'?`Đồng giá ${money(form.GiaTri)}`:form.LoaiKhuyenMai==='COMBO'?`Combo ${money(form.GiaTri)}`:'Mua X tặng Y'}</div></>}
+   {step===3&&<><h3 className="font-bold border-l-4 border-pink-500 pl-2">Phạm vi áp dụng</h3><select className="w-full border rounded-lg p-2" value={form.PhamVi} onChange={e=>update('PhamVi',e.target.value)}>{[['TOAN_BO','Toàn bộ'],['DANH_MUC','Danh mục'],['SAN_PHAM','Sản phẩm'],['THUONG_HIEU','Thương hiệu']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>{form.PhamVi!=='TOAN_BO'&&<div className="max-h-64 overflow-auto border rounded p-2">{(form.PhamVi==='DANH_MUC'?categories:form.PhamVi==='SAN_PHAM'?products:[...new Set(products.map((p:any)=>p.ThuongHieu).filter(Boolean))].map((x:any)=>({ThuongHieu:x}))).map((x:any)=>{const id=form.PhamVi==='DANH_MUC'?x.MaDanhMuc:form.PhamVi==='SAN_PHAM'?x.MaSanPham:x.ThuongHieu;const label=form.PhamVi==='DANH_MUC'?x.TenDanhMuc:form.PhamVi==='SAN_PHAM'?x.TenSanPham:x.ThuongHieu;return <label key={id} className="flex gap-2 p-2 text-sm"><input type="checkbox" checked={form.DoiTuongApDung.includes(String(id))} onChange={()=>update('DoiTuongApDung',form.DoiTuongApDung.includes(String(id))?form.DoiTuongApDung.filter((v:string)=>v!==String(id)):[...form.DoiTuongApDung,String(id)])}/>{label}</label>})}</div>}<Toggle label="Cho phép kết hợp voucher" checked={form.ChoPhepKetHopVoucher} change={(v:boolean)=>update('ChoPhepKetHopVoucher',v)}/><Toggle label="Tự động kích hoạt đúng thời gian" checked={form.TuDongKichHoat} change={(v:boolean)=>update('TuDongKichHoat',v)}/>{notice&&<p className="text-red-600 text-sm">{notice}</p>}</>}
+  </div><div className="sticky bottom-0 bg-white border-t p-4 flex justify-between"><button onClick={()=>step>1?setStep(step-1):setOpen(false)} className="border rounded-lg px-4 py-2">{step>1?'Quay lại':'Hủy'}</button><div className="flex gap-2">{step<3?<button onClick={()=>{setNotice('');setStep(step+1)}} className="bg-pink-600 text-white rounded-lg px-5 py-2">Tiếp tục</button>:<button disabled={saving} onClick={save} className="bg-pink-600 text-white rounded-lg px-5 py-2 disabled:opacity-50">{saving?'Đang lưu…':editId?'Lưu thay đổi':'Tạo chương trình'}</button>}</div></div></div></div>}
+  {detail&&<div className="fixed inset-0 z-30 bg-black/30 flex justify-end" onClick={()=>setDetail(null)}><aside className="w-full max-w-md bg-white h-full overflow-auto p-5" onClick={e=>e.stopPropagation()}><div className="flex justify-between font-bold text-lg">Chi tiết {detail.MaChuongTrinh}<button onClick={()=>setDetail(null)}>×</button></div><p className="mt-4">{detail.TenChuongTrinh}</p><p className="text-sm text-slate-500">{discountText(detail)} · {states[detail.TrangThaiHienTai]||detail.TrangThai}</p><div className="mt-5 rounded-lg bg-pink-50 p-4">{detail.MoTa||'Chưa có mô tả'}<p className="mt-2">Ưu tiên: {detail.DoUuTien} · Kết hợp voucher: {detail.ChoPhepKetHopVoucher?'Có':'Không'}</p></div><h3 className="font-bold mt-5">Sản phẩm xung đột</h3>{conflicts.length?conflicts.map((c:any)=><p key={`${c.MaSanPham}-${c.KhuyenMaiId}`} className="py-2 border-b">{c.TenSanPham} · {c.MaChuongTrinh} (ưu tiên {c.DoUuTien})</p>):<p className="text-slate-500">Không có xung đột sản phẩm theo phạm vi sản phẩm trực tiếp.</p>}<h3 className="font-bold mt-5">Đơn hàng phát sinh</h3>{orders.map((o:any)=><p key={o.MaHoaDon} className="py-2 border-b">Đơn #{o.MaHoaDon} · {o.TrangThai} · giảm {money(o.TienGiam)}</p>)}<h3 className="font-bold mt-5">Hiệu quả</h3><p>{effect?.SoDon||0} đơn · giảm {money(effect?.TongTienGiam)}</p></aside></div>}
+ </div>
 }
-
-interface Stats {
-  tongSanPhamKhuyenMai: number;
-  giaGiamTrungBinh: number;
-  giaGiamCaoNhat: number;
-}
-
-export default function KhuyenMai() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<Product | null>(null);
-  const [giaKhuyenMai, setGiaKhuyenMai] = useState('');
-
-  const token = localStorage.getItem('token');
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [resKM, resStats] = await Promise.all([
-        axios.get(`${API}/khuyenmai`, { headers, params: { page: pagination.page, limit: pagination.limit, search } }),
-        axios.get(`${API}/khuyenmai/stats`, { headers })
-      ]);
-      setProducts(resKM.data.data || []);
-      if (resKM.data.pagination) setPagination(resKM.data.pagination);
-      setStats(resStats.data.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, [pagination.page, search]);
-
-  const handleEdit = (p: Product) => {
-    setEditing(p);
-    setGiaKhuyenMai(p.GiaKhuyenMai?.toString() || '');
-    setShowModal(true);
-  };
-
-  const handleSave = async () => {
-    if (!editing) return;
-    if (!giaKhuyenMai || Number(giaKhuyenMai) <= 0) {
-      alert('Vui lòng nhập giá khuyến mãi hợp lệ');
-      return;
-    }
-    if (Number(giaKhuyenMai) >= editing.GiaBan) {
-      alert('Giá khuyến mãi phải nhỏ hơn giá bán!');
-      return;
-    }
-    try {
-      await axios.put(`${API}/khuyenmai/${editing.MaKhuyenMai}`, { GiaKhuyenMai: Number(giaKhuyenMai) }, { headers });
-      alert('Cập nhật thành công!');
-      setShowModal(false);
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Lỗi cập nhật');
-    }
-  };
-
-  const handleDelete = async (p: Product) => {
-    if (!confirm(`Xóa khuyến mãi của "${p.TenSanPham}"?`)) return;
-    try {
-      await axios.delete(`${API}/khuyenmai/${p.MaKhuyenMai}`, { headers });
-      alert('Đã xóa khuyến mãi!');
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Lỗi xóa');
-    }
-  };
-
-  const phanTramGiam = editing
-    ? Math.round(((editing.GiaBan - Number(giaKhuyenMai)) / editing.GiaBan) * 100)
-    : 0;
-
-  return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-pink-50 to-red-50 rounded-xl p-6 mb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">🎁 Quản lý Khuyến mãi</h1>
-          <p className="text-sm text-gray-500 mt-1">Thiết lập giá khuyến mãi cho sản phẩm</p>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-xl shadow p-5 flex items-center gap-4">
-          <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
-            <TagIcon className="w-6 h-6 text-red-500" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-gray-800">{stats?.tongSanPhamKhuyenMai || 0}</div>
-            <div className="text-sm text-gray-500">Sản phẩm đang KM</div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl shadow p-5 flex items-center gap-4">
-          <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
-            <span className="text-orange-500 font-bold text-lg">%</span>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-gray-800">{stats?.giaGiamTrungBinh || 0}%</div>
-            <div className="text-sm text-gray-500">Giảm giá trung bình</div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl shadow p-5 flex items-center gap-4">
-          <div className="w-12 h-12 bg-pink-100 rounded-xl flex items-center justify-center">
-            <span className="text-pink-500 font-bold text-lg">↑</span>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-gray-800">{stats?.giaGiamCaoNhat || 0}%</div>
-            <div className="text-sm text-gray-500">Giảm giá cao nhất</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div className="bg-white rounded-xl shadow p-4 mb-6">
-        <input
-          type="text"
-          placeholder="Tìm kiếm sản phẩm khuyến mãi..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        />
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sản phẩm</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Giá gốc</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Giá KM</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">% Giảm</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tiết kiệm</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
-                <tr><td colSpan={6} className="py-8 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-500 mx-auto"></div></td></tr>
-              ) : products.length === 0 ? (
-                <tr><td colSpan={6} className="py-8 text-center text-gray-500">Không có sản phẩm khuyến mãi</td></tr>
-              ) : products.map((p) => (
-                <tr key={p.MaKhuyenMai} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      {p.HinhAnh ? (
-                        <img src={`${IMG}${p.HinhAnh}`} alt={p.TenSanPham}
-                          className="w-10 h-10 object-cover rounded-lg border"
-                          onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder.png'; }} />
-                      ) : (
-                        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400 text-xs">N/A</div>
-                      )}
-                      <span className="font-medium text-gray-800 text-sm">{p.TenSanPham}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm text-gray-500 line-through">{formatCurrency(p.GiaBan)}</td>
-                  <td className="px-4 py-3 text-right text-sm font-bold text-red-600">{formatCurrency(p.GiaKhuyenMai)}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
-                      -{p.PhanTramGiam}%
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm text-green-600 font-medium">
-                    {formatCurrency(p.GiaBan - p.GiaKhuyenMai)}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex justify-center gap-2">
-                      <button onClick={() => handleEdit(p)}
-                        className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50">
-                        <PencilIcon className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(p)}
-                        className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50">
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        {pagination.totalPages > 1 && (
-          <div className="bg-gray-50 px-6 py-3 flex items-center justify-between border-t">
-            <div className="text-sm text-gray-700">Tổng: <span className="font-medium">{pagination.total}</span> sản phẩm KM</div>
-            <div className="flex gap-2">
-              <button onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))} disabled={pagination.page === 1}
-                className="px-3 py-1 border border-gray-300 rounded-md disabled:opacity-50 hover:bg-gray-100 text-sm">Trước</button>
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(pg => (
-                <button key={pg} onClick={() => setPagination(p => ({ ...p, page: pg }))}
-                  className={`px-3 py-1 border rounded-md text-sm ${pg === pagination.page ? 'bg-pink-500 text-white border-pink-500' : 'border-gray-300 hover:bg-gray-100'}`}>
-                  {pg}
-                </button>
-              ))}
-              <button onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))} disabled={pagination.page === pagination.totalPages}
-                className="px-3 py-1 border border-gray-300 rounded-md disabled:opacity-50 hover:bg-gray-100 text-sm">Sau</button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Modal sửa giá KM */}
-      {showModal && editing && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-lg font-bold text-gray-800">✏️ Cập nhật giá khuyến mãi</h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
-                <XMarkIcon className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="font-medium text-gray-800">{editing.TenSanPham}</div>
-                <div className="text-sm text-gray-500 mt-1">Giá gốc: <span className="font-semibold text-gray-700">{formatCurrency(editing.GiaBan)}</span></div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Giá khuyến mãi <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  value={giaKhuyenMai}
-                  onChange={(e) => setGiaKhuyenMai(e.target.value)}
-                  min={1000}
-                  max={editing.GiaBan - 1}
-                  step={1000}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  placeholder="Nhập giá khuyến mãi..."
-                />
-              </div>
-
-              {giaKhuyenMai && Number(giaKhuyenMai) > 0 && Number(giaKhuyenMai) < editing.GiaBan && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Giảm:</span>
-                    <span className="font-bold text-red-600">-{phanTramGiam}%</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-gray-600">Tiết kiệm:</span>
-                    <span className="font-bold text-green-600">{formatCurrency(editing.GiaBan - Number(giaKhuyenMai))}</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button onClick={() => setShowModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-                  Hủy
-                </button>
-                <button onClick={handleSave}
-                  className="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 font-medium">
-                  Lưu
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+function Field({label,value,change,type='text',required=false}:any){return <label className="block text-sm text-slate-700">{label}{required&&<span className="text-red-500"> *</span>}<input type={type} required={required} className="mt-1 block w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-pink-200" value={value??''} onChange={e=>change(e.target.value)}/></label>}
+function Toggle({label,checked,change}:any){return <label className="flex items-center justify-between py-2 text-sm">{label}<input type="checkbox" checked={Boolean(checked)} onChange={e=>change(e.target.checked)} className="accent-pink-600 w-5 h-5"/></label>}
