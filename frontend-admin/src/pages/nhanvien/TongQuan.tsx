@@ -26,7 +26,7 @@ const orderStatus: Record<string,string> = {
 };
 const paymentStatus: Record<string,string> = { CHUA_THANH_TOAN:'Chưa thanh toán', CHO_THANH_TOAN:'Chờ thanh toán', DA_THANH_TOAN:'Đã thanh toán', CHO_HOAN_TIEN:'Chờ hoàn tiền', DA_HOAN_TIEN:'Đã hoàn tiền' };
 const shippingStatus: Record<string,string> = { CHUA_TAO_VAN_DON:'Chưa tạo vận đơn', CHO_LAY_HANG:'Chờ lấy hàng', DA_LAY_HANG:'Đã lấy hàng', DANG_VAN_CHUYEN:'Đang vận chuyển', DANG_GIAO:'Đang giao', GIAO_THANH_CONG:'Giao thành công', GIAO_THAT_BAI:'Giao thất bại', DANG_HOAN_VE:'Đang hoàn về' };
-const imageUrl = (value?: string) => !value ? '' : /^https?:\/\//i.test(value) ? value : `${API_ORIGIN}${value.startsWith('/') ? value : `/${value}`}`;
+const imageUrl = (value?: string) => !value ? undefined : /^https?:\/\//i.test(value) ? value : `${API_ORIGIN}${value.startsWith('/') ? value : `/${value}`}`;
 const errorText = (error: any) => {
   if (!error?.response) return 'Không thể kết nối Backend. Kiểm tra máy chủ và URL API rồi thử lại.';
   const status = error.response.status;

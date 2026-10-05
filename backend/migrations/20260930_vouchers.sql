@@ -45,6 +45,43 @@ BEGIN TRY
     CREATE INDEX IX_Voucher_Status_Time ON dbo.Voucher(TrangThai,NgayBatDau,NgayKetThuc);
   END;
 
+  IF COL_LENGTH('dbo.Voucher','Id') IS NULL ALTER TABLE dbo.Voucher ADD Id int IDENTITY(1,1) NOT NULL;
+  IF COL_LENGTH('dbo.Voucher','MaVoucherKey') IS NULL ALTER TABLE dbo.Voucher ADD MaVoucherKey AS UPPER(LTRIM(RTRIM(MaVoucher))) PERSISTED;
+  IF COL_LENGTH('dbo.Voucher','TenChuongTrinh') IS NULL ALTER TABLE dbo.Voucher ADD TenChuongTrinh nvarchar(160) NULL;
+  IF COL_LENGTH('dbo.Voucher','GiamToiDa') IS NULL ALTER TABLE dbo.Voucher ADD GiamToiDa decimal(18,2) NULL;
+  IF COL_LENGTH('dbo.Voucher','DonHangToiThieu') IS NULL ALTER TABLE dbo.Voucher ADD DonHangToiThieu decimal(18,2) NOT NULL CONSTRAINT DF_Voucher_Min_Compat DEFAULT(0) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','TongLuotSuDung') IS NULL ALTER TABLE dbo.Voucher ADD TongLuotSuDung int NOT NULL CONSTRAINT DF_Voucher_Total_Compat DEFAULT(1000000) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','LuotDaSuDung') IS NULL ALTER TABLE dbo.Voucher ADD LuotDaSuDung int NOT NULL CONSTRAINT DF_Voucher_Used_Compat DEFAULT(0) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','LuotDangGiu') IS NULL ALTER TABLE dbo.Voucher ADD LuotDangGiu int NOT NULL CONSTRAINT DF_Voucher_Held_Compat DEFAULT(0) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','MoiKhachToiDa') IS NULL ALTER TABLE dbo.Voucher ADD MoiKhachToiDa int NOT NULL CONSTRAINT DF_Voucher_PerCustomer_Compat DEFAULT(1) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','PhamVi') IS NULL ALTER TABLE dbo.Voucher ADD PhamVi varchar(24) NOT NULL CONSTRAINT DF_Voucher_Scope_Compat DEFAULT('TOAN_BO_DON_HANG') WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','DoiTuong') IS NULL ALTER TABLE dbo.Voucher ADD DoiTuong varchar(28) NOT NULL CONSTRAINT DF_Voucher_Audience_Compat DEFAULT('TAT_CA_KHACH_HANG') WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','ChoPhepKetHopPhiShip') IS NULL ALTER TABLE dbo.Voucher ADD ChoPhepKetHopPhiShip bit NOT NULL CONSTRAINT DF_Voucher_Combine_Compat DEFAULT(0) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','TuDongKichHoat') IS NULL ALTER TABLE dbo.Voucher ADD TuDongKichHoat bit NOT NULL CONSTRAINT DF_Voucher_Auto_Compat DEFAULT(0) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','CreatedAt') IS NULL ALTER TABLE dbo.Voucher ADD CreatedAt datetime2 NOT NULL CONSTRAINT DF_Voucher_Created_Compat DEFAULT(SYSDATETIME()) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','UpdatedAt') IS NULL ALTER TABLE dbo.Voucher ADD UpdatedAt datetime2 NOT NULL CONSTRAINT DF_Voucher_Updated_Compat DEFAULT(SYSDATETIME()) WITH VALUES;
+  IF COL_LENGTH('dbo.Voucher','CreatedBy') IS NULL ALTER TABLE dbo.Voucher ADD CreatedBy int NULL;
+  IF COL_LENGTH('dbo.Voucher','UpdatedBy') IS NULL ALTER TABLE dbo.Voucher ADD UpdatedBy int NULL;
+
+  IF COL_LENGTH('dbo.Voucher','TenVoucher') IS NOT NULL
+    EXEC(N'UPDATE dbo.Voucher SET TenChuongTrinh=LEFT(TenVoucher,160) WHERE TenChuongTrinh IS NULL;');
+  EXEC(N'UPDATE dbo.Voucher SET TenChuongTrinh=MaVoucher WHERE TenChuongTrinh IS NULL;');
+  ALTER TABLE dbo.Voucher ALTER COLUMN TenChuongTrinh nvarchar(160) NOT NULL;
+  IF COL_LENGTH('dbo.Voucher','DonToiThieu') IS NOT NULL
+    EXEC(N'UPDATE dbo.Voucher SET DonHangToiThieu=DonToiThieu WHERE DonToiThieu IS NOT NULL;');
+  IF COL_LENGTH('dbo.Voucher','SoLanSuDung') IS NOT NULL
+    EXEC(N'UPDATE dbo.Voucher SET TongLuotSuDung=CASE WHEN SoLanSuDung>0 THEN CASE WHEN SoLanSuDung<COALESCE(SoLanDaDung,0) THEN SoLanDaDung ELSE SoLanSuDung END ELSE 1000000 END;');
+  IF COL_LENGTH('dbo.Voucher','SoLanDaDung') IS NOT NULL
+    EXEC(N'UPDATE dbo.Voucher SET LuotDaSuDung=COALESCE(SoLanDaDung,0);');
+  EXEC(N'UPDATE dbo.Voucher SET LoaiGiam=CASE WHEN LoaiGiam IN(N''PhanTram'',N''PHAN_TRAM'') THEN ''PHAN_TRAM'' WHEN LoaiGiam IN(N''MIEN_GIAM_PHI_SHIP'') THEN ''MIEN_GIAM_PHI_SHIP'' ELSE ''SO_TIEN_CO_DINH'' END;');
+  EXEC(N'UPDATE dbo.Voucher SET TrangThai=CASE WHEN TrangThai IN(N''Hoạt động'',N''Hoat dong'',N''Active'') THEN ''DANG_HOAT_DONG'' WHEN TrangThai IN(N''Tạm dừng'',N''Tam dung'') THEN ''TAM_DUNG'' WHEN TrangThai IN(N''Hết hạn'',N''Het han'') THEN ''HET_HAN'' WHEN TrangThai IS NULL THEN ''NHAP'' ELSE TrangThai END;');
+  IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='UX_Voucher_Id' AND object_id=OBJECT_ID('dbo.Voucher'))
+    CREATE UNIQUE INDEX UX_Voucher_Id ON dbo.Voucher(Id);
+  IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='UX_Voucher_Code_CI' AND object_id=OBJECT_ID('dbo.Voucher'))
+    CREATE UNIQUE INDEX UX_Voucher_Code_CI ON dbo.Voucher(MaVoucherKey);
+  IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='IX_Voucher_Status_Time' AND object_id=OBJECT_ID('dbo.Voucher'))
+    CREATE INDEX IX_Voucher_Status_Time ON dbo.Voucher(TrangThai,NgayBatDau,NgayKetThuc);
+
   IF OBJECT_ID('dbo.VoucherSanPham','U') IS NULL
   BEGIN
     CREATE TABLE dbo.VoucherSanPham(VoucherId int NOT NULL,MaSanPham int NOT NULL,

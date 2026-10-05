@@ -34,12 +34,14 @@ function normalizeVariant(raw: any) {
     if (v === undefined || v === null || v === "") return null;
     const n = Number(v); if (!Number.isFinite(n) || n <= 0) throw new Error(`${name} phải là số dương hợp lệ`); return n;
   };
+  const colorCode = nullable(raw.MaMau) || nullable(raw.TenMau) || nullable(raw.MaHEX);
+  const colorName = nullable(raw.TenMau) || nullable(raw.MaMau) || nullable(raw.MaHEX);
   const v = {
     MaBienThe: raw.MaBienThe == null || raw.MaBienThe === "" ? null : Number(raw.MaBienThe),
     MaSKU: String(raw.MaSKU || "").trim(),
     DungTich: numeric(raw.DungTich, "Dung tích"), DonViDungTich: nullable(raw.DonViDungTich),
     KhoiLuong: numeric(raw.KhoiLuong, "Khối lượng"), DonViKhoiLuong: nullable(raw.DonViKhoiLuong),
-    MaMau: nullable(raw.MaMau), TenMau: nullable(raw.TenMau), MaHEX: nullable(raw.MaHEX),
+    MaMau: colorCode, TenMau: colorName, MaHEX: nullable(raw.MaHEX),
     MuiHuong: nullable(raw.MuiHuong), QuyCachDongGoi: nullable(raw.QuyCachDongGoi),
     GiaBan: Number(raw.GiaBan), HinhAnh: nullable(raw.HinhAnh), TrangThai: raw.TrangThai === false || raw.TrangThai === 0 ? 0 : 1,
   };
@@ -49,6 +51,7 @@ function normalizeVariant(raw: any) {
   if (!v.DungTich && !v.KhoiLuong && !v.MaMau && !v.MuiHuong && !v.QuyCachDongGoi) throw new Error(`SKU ${v.MaSKU} phải có ít nhất một thuộc tính biến thể`);
   if (v.MaHEX && !/^#[0-9a-fA-F]{6}$/.test(String(v.MaHEX))) throw new Error(`Mã HEX của SKU ${v.MaSKU} phải theo dạng #RRGGBB`);
   const key = JSON.stringify([v.DungTich,v.DonViDungTich,v.KhoiLuong,v.DonViKhoiLuong,v.MaMau,v.TenMau,v.MaHEX,v.MuiHuong,v.QuyCachDongGoi].map(x => x == null ? null : String(x).trim().toLocaleLowerCase("vi-VN")));
+  if (key.length > 800) throw new Error(`Tổ hợp thuộc tính của SKU ${v.MaSKU} quá dài`);
   return { ...v, ThuocTinhKey: key };
 }
 async function getProductVariants(productId: number) {
@@ -73,7 +76,7 @@ router.put("/:id/bien-the", authorizeRoles(...STAFF), async (req: AuthRequest, r
     const product = await request().input("productId", sql.Int, productId).query("SELECT MaSanPham FROM dbo.SanPham WITH(UPDLOCK,HOLDLOCK) WHERE MaSanPham=@productId AND IsDeleted=0");
     if (!product.recordset[0]) throw new Error("Sản phẩm không tồn tại");
     for (const v of variants) {
-      const q=request().input("productId",sql.Int,productId).input("variantId",sql.Int,v.MaBienThe).input("sku",sql.VarChar(80),v.MaSKU).input("key",sql.NVarChar(1000),v.ThuocTinhKey)
+      const q=request().input("productId",sql.Int,productId).input("variantId",sql.Int,v.MaBienThe).input("sku",sql.VarChar(80),v.MaSKU).input("key",sql.NVarChar(800),v.ThuocTinhKey)
         .input("volume",sql.Decimal(10,2),v.DungTich).input("volumeUnit",sql.NVarChar(20),v.DonViDungTich).input("weight",sql.Decimal(10,2),v.KhoiLuong).input("weightUnit",sql.NVarChar(20),v.DonViKhoiLuong)
         .input("color",sql.NVarChar(80),v.MaMau).input("colorName",sql.NVarChar(120),v.TenMau).input("hex",sql.Char(7),v.MaHEX).input("scent",sql.NVarChar(120),v.MuiHuong).input("pack",sql.NVarChar(120),v.QuyCachDongGoi)
         .input("price",sql.Decimal(18,2),v.GiaBan).input("image",sql.VarChar(500),v.HinhAnh).input("status",sql.Bit,v.TrangThai);

@@ -4,7 +4,7 @@ import { API_BASE_URL, returnsAPI } from '../../services/api';
 import { formatCurrency } from '../../utils/format';
 
 const STATUS:Record<string,string>={CHO_DUYET:'Chờ duyệt',DA_DUYET:'Đã duyệt',TU_CHOI:'Từ chối',CHO_KHACH_GUI_HANG:'Chờ khách gửi hàng',CHO_LAY_HANG_HOAN:'Chờ lấy hàng hoàn',DA_LAY_HANG_HOAN:'Đã lấy hàng',DANG_HOAN_VE:'Đang hoàn về',DA_NHAN_HANG_HOAN:'Chờ kiểm tra',DANG_KIEM_TRA:'Đang kiểm tra',CHAP_NHAN_HOAN:'Chờ xử lý kho',TU_CHOI_SAU_KIEM_TRA:'Từ chối sau kiểm tra',CHO_HOAN_TIEN:'Chờ hoàn tiền',DANG_HOAN_TIEN:'Đang hoàn tiền',DA_HOAN_TIEN:'Đã hoàn tiền',DA_DOI_HANG:'Đã đổi hàng',HOAN_TAT:'Hoàn tất',DA_HUY:'Đã hủy'};
-const image=(url?:string)=>url?url.startsWith('http')?url:`${API_BASE_URL.replace(/\/api\/?$/,'')}${url.startsWith('/')?url:`/${url}`}`:'';
+const image=(url?:string)=>url?url.startsWith('http')?url:`${API_BASE_URL.replace(/\/api\/?$/,'')}${url.startsWith('/')?url:`/${url}`}`:undefined;
 
 export default function ChiTietHoanTra(){
   const {id}=useParams();const navigate=useNavigate();const [data,setData]=useState<any>();const [error,setError]=useState('');

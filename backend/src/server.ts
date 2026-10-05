@@ -2,7 +2,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import path from "path";
+import swaggerUi from "swagger-ui-express";
 import { getPool } from "./config/database";
+import swaggerDocument from './swagger';
 
 dotenv.config();
 
@@ -36,6 +38,11 @@ import { authenticate, authenticateOptional } from "./middleware/auth";
 
 // Public
 app.use("/api/auth", authRoutes);
+// API documentation
+app.get('/api-docs.json', (_req, res) => {
+  res.json(swaggerDocument);
+});
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Protected
 app.use("/api/dashboard", authenticate, dashboardRoutes);

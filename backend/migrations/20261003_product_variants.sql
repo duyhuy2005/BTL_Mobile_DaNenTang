@@ -9,7 +9,7 @@ BEGIN
     MaBienThe int IDENTITY(1,1) NOT NULL CONSTRAINT PK_BienTheSanPham PRIMARY KEY,
     MaSanPham int NOT NULL,
     MaSKU varchar(80) NOT NULL,
-    ThuocTinhKey nvarchar(1000) NOT NULL,
+    ThuocTinhKey nvarchar(800) NOT NULL,
     DungTich decimal(10,2) NULL,
     DonViDungTich nvarchar(20) NULL,
     KhoiLuong decimal(10,2) NULL,
@@ -30,9 +30,19 @@ BEGIN
     CONSTRAINT CK_BienTheSanPham_HasAttribute CHECK (DungTich IS NOT NULL OR KhoiLuong IS NOT NULL OR NULLIF(MaMau,N'') IS NOT NULL OR NULLIF(MuiHuong,N'') IS NOT NULL OR NULLIF(QuyCachDongGoi,N'') IS NOT NULL)
   );
   CREATE UNIQUE INDEX UX_BienTheSanPham_SKU ON dbo.BienTheSanPham(MaSKU);
-  CREATE UNIQUE INDEX UX_BienTheSanPham_Combination ON dbo.BienTheSanPham(MaSanPham,ThuocTinhKey);
   CREATE INDEX IX_BienTheSanPham_Product ON dbo.BienTheSanPham(MaSanPham,TrangThai);
 END;
+GO
+
+IF EXISTS(SELECT 1 FROM dbo.BienTheSanPham WHERE DATALENGTH(ThuocTinhKey)>1600)
+  THROW 51000,'Existing variant keys exceed the supported 800-character limit; index was not changed.',1;
+IF EXISTS(SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.BienTheSanPham') AND name=N'UX_BienTheSanPham_Combination')
+  AND EXISTS(SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.BienTheSanPham') AND name=N'ThuocTinhKey' AND max_length>1600)
+  DROP INDEX UX_BienTheSanPham_Combination ON dbo.BienTheSanPham;
+IF EXISTS(SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.BienTheSanPham') AND name=N'ThuocTinhKey' AND max_length>1600)
+  ALTER TABLE dbo.BienTheSanPham ALTER COLUMN ThuocTinhKey nvarchar(800) NOT NULL;
+IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.BienTheSanPham') AND name=N'UX_BienTheSanPham_Combination')
+  CREATE UNIQUE INDEX UX_BienTheSanPham_Combination ON dbo.BienTheSanPham(MaSanPham,ThuocTinhKey);
 GO
 
 IF COL_LENGTH(N'dbo.LoSanPham',N'MaBienThe') IS NULL ALTER TABLE dbo.LoSanPham ADD MaBienThe int NULL;

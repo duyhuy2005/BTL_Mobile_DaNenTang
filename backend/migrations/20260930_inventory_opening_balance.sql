@@ -9,5 +9,8 @@ BEGIN TRY
  INSERT INTO dbo.BienDongKho(MaSanPham,MaLo,Loai,SoLuong,TonTruoc,TonSau,GhiChu)
  SELECT l.MaSanPham,l.MaLo,N'Tồn đầu kỳ',l.SoLuongTon,0,l.SoLuongTon,N'Chuyển đổi tồn cũ, cần bổ sung lô/hạn dùng thực tế'
  FROM dbo.LoSanPham l WHERE l.MaLoCode LIKE 'OPEN-%' AND NOT EXISTS(SELECT 1 FROM dbo.BienDongKho b WHERE b.MaLo=l.MaLo AND b.Loai=N'Tồn đầu kỳ');
+ UPDATE dbo.LoSanPham SET TrangThai=N'Tồn đầu kỳ',ViTri=N'Chưa phân vị trí' WHERE MaLoCode LIKE 'OPEN-%' AND (TrangThai<>N'Tồn đầu kỳ' OR ViTri<>N'Chưa phân vị trí');
+ UPDATE b SET Loai=N'Tồn đầu kỳ',GhiChu=N'Chuyển đổi tồn cũ, cần bổ sung lô/hạn dùng thực tế'
+ FROM dbo.BienDongKho b JOIN dbo.LoSanPham l ON l.MaLo=b.MaLo WHERE l.MaLoCode LIKE 'OPEN-%' AND b.Loai LIKE N'T%';
  COMMIT TRANSACTION;
 END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK TRANSACTION; THROW; END CATCH;

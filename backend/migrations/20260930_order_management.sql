@@ -22,10 +22,15 @@ BEGIN TRY
         ELSE N''Chờ thanh toán'' END
     WHERE TrangThaiThanhToan IS NULL;
     UPDATE dbo.HoaDon SET TrangThaiVanChuyen=CASE WHEN TrangThai IN(N''Đã giao'',N''Hoàn thành'') THEN N''Giao thành công'' ELSE N''Chưa tạo vận đơn'' END WHERE TrangThaiVanChuyen IS NULL;
-    UPDATE dbo.HoaDon SET TamTinh=x.TamTinh,GiamGia=ISNULL(GiamGia,0),GiamGiaSanPham=ISNULL(GiamGiaSanPham,0),GiamGiaVoucher=ISNULL(GiamGiaVoucher,0),PhiVanChuyen=ISNULL(PhiVanChuyen,0),TongTien=x.TamTinh+ISNULL(PhiVanChuyen,0)-ISNULL(GiamGia,0),NgayCapNhat=ISNULL(NgayCapNhat,NgayLap)
-    FROM dbo.HoaDon hd CROSS APPLY(SELECT ISNULL(SUM(ct.SoLuong*ct.DonGia),0) TamTinh FROM dbo.ChiTietHoaDon ct WHERE ct.MaHoaDon=hd.MaHoaDon)x WHERE hd.TamTinh IS NULL OR hd.TongTien IS NULL OR hd.NgayCapNhat IS NULL;
     UPDATE ct SET MaSKUSnapshot=sp.MaSKU,BienTheSnapshot=CASE WHEN sp.DungTich IS NOT NULL THEN CONCAT(CONVERT(varchar(30),sp.DungTich),'' '',ISNULL(sp.DonVi,'''')) ELSE sp.QuyCachDongGoi END FROM dbo.ChiTietHoaDon ct JOIN dbo.SanPham sp ON sp.MaSanPham=ct.MaSanPham WHERE ct.MaSKUSnapshot IS NULL OR ct.BienTheSnapshot IS NULL;
   ';
+
+  IF COLUMNPROPERTY(OBJECT_ID('dbo.HoaDon'),'TongTien','IsComputed')=1
+    EXEC(N'UPDATE hd SET TamTinh=x.TamTinh,GiamGia=ISNULL(GiamGia,0),GiamGiaSanPham=ISNULL(GiamGiaSanPham,0),GiamGiaVoucher=ISNULL(GiamGiaVoucher,0),PhiVanChuyen=ISNULL(PhiVanChuyen,0),NgayCapNhat=ISNULL(NgayCapNhat,NgayLap)
+      FROM dbo.HoaDon hd CROSS APPLY(SELECT ISNULL(SUM(ct.SoLuong*ct.DonGia),0) TamTinh FROM dbo.ChiTietHoaDon ct WHERE ct.MaHoaDon=hd.MaHoaDon)x WHERE hd.TamTinh IS NULL OR hd.GiamGia IS NULL OR hd.PhiVanChuyen IS NULL OR hd.NgayCapNhat IS NULL;');
+  ELSE
+    EXEC(N'UPDATE hd SET TamTinh=x.TamTinh,GiamGia=ISNULL(GiamGia,0),GiamGiaSanPham=ISNULL(GiamGiaSanPham,0),GiamGiaVoucher=ISNULL(GiamGiaVoucher,0),PhiVanChuyen=ISNULL(PhiVanChuyen,0),TongTien=x.TamTinh+ISNULL(PhiVanChuyen,0)-ISNULL(GiamGia,0),NgayCapNhat=ISNULL(NgayCapNhat,NgayLap)
+      FROM dbo.HoaDon hd CROSS APPLY(SELECT ISNULL(SUM(ct.SoLuong*ct.DonGia),0) TamTinh FROM dbo.ChiTietHoaDon ct WHERE ct.MaHoaDon=hd.MaHoaDon)x WHERE hd.TamTinh IS NULL OR hd.TongTien IS NULL OR hd.NgayCapNhat IS NULL;');
 
   IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='IX_HoaDon_QuanLy' AND object_id=OBJECT_ID('dbo.HoaDon')) CREATE INDEX IX_HoaDon_QuanLy ON dbo.HoaDon(TrangThai,TrangThaiThanhToan,NgayLap DESC);
   IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='UX_HoaDon_MaVanDon' AND object_id=OBJECT_ID('dbo.HoaDon')) EXEC(N'CREATE UNIQUE INDEX UX_HoaDon_MaVanDon ON dbo.HoaDon(MaVanDon) WHERE MaVanDon IS NOT NULL;');
