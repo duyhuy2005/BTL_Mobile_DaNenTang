@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "BeautyStore",
+    "slug": "beauty-store",
+    "version": "1.0.0",
+    "scheme": "beautystore",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

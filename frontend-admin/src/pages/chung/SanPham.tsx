@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { categoriesAPI, productsAPI } from '../../services/api';
+import { API_BASE_URL, categoriesAPI, productsAPI } from '../../services/api';
 import { formatCurrency } from '../../utils/format';
 
 export default function Products() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const isAdmin = user.VaiTro === 'Admin';
-  const canEdit = isAdmin; // Chỉ Admin mới được thêm/sửa/xóa
+  const canEdit = isAdmin || user.VaiTro === 'NhanVien';
   
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -21,6 +21,7 @@ export default function Products() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [uploading, setUploading] = useState(false);
+  const [variants, setVariants] = useState<any[]>([]);
 
   useEffect(() => {
     loadCategories();
@@ -107,7 +108,7 @@ export default function Products() {
       formData.append('image', imageFile);
 
       const token = localStorage.getItem('token');
-      const response = await axios.post('http://localhost:3000/api/upload', formData, {
+      const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
@@ -164,11 +165,12 @@ export default function Products() {
         data.HinhAnh = editingProduct.HinhAnh;
       }
 
-      if (editingProduct) {
-        await productsAPI.update(editingProduct.MaSanPham, data);
-      } else {
-        await productsAPI.create(data);
-      }
+      // Main product stays the common catalogue record; sellable combinations are saved separately.
+      const productResponse = editingProduct
+        ? await productsAPI.update(editingProduct.MaSanPham, data)
+        : await productsAPI.create(data);
+      const productId = editingProduct?.MaSanPham || productResponse.data.data.MaSanPham;
+      if (variants.length) await productsAPI.updateVariants(productId, variants);
       
       setShowModal(false);
       setEditingProduct(null);
@@ -180,17 +182,23 @@ export default function Products() {
     }
   };
 
-  const openModal = (product?: any) => {
+  const openModal = async (product?: any) => {
     if (product) {
       setEditingProduct(product);
-      setImagePreview(product.HinhAnh ? `http://localhost:3000${product.HinhAnh}` : '');
+      setImagePreview(product.HinhAnh ? `${API_BASE_URL.replace(/\/api$/, '')}${product.HinhAnh}` : '');
+      try { const detail = await productsAPI.getById(product.MaSanPham); setVariants(detail.data.data.BienThe || []); }
+      catch { setVariants([]); }
     } else {
       setEditingProduct(null);
       setImagePreview('');
+      setVariants([]);
     }
     setImageFile(null);
     setShowModal(true);
   };
+
+  const updateVariant = (index: number, field: string, value: any) => setVariants(rows => rows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+  const addVariant = () => setVariants(rows => [...rows, { MaSKU: '', GiaBan: '', TrangThai: 1, DungTich: '', DonViDungTich: 'ml', KhoiLuong: '', DonViKhoiLuong: 'g', TenMau: '', MaHEX: '', MuiHuong: '', QuyCachDongGoi: '' }]);
 
   // Tính trạng thái dựa trên số lượng
   const getStockStatus = (soLuong: number) => {
@@ -345,8 +353,8 @@ export default function Products() {
                           <td className="px-6 py-4 whitespace-nowrap">{(pagination.page - 1) * pagination.limit + idx + 1}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {product.HinhAnh ? (
-                              <img 
-                                src={`http://localhost:3000${product.HinhAnh}`} 
+                              <img
+                                src={`${API_BASE_URL.replace(/\/api$/, '')}${product.HinhAnh}`}
                                 alt={product.TenSanPham}
                                 className="w-16 h-16 object-cover rounded-lg border border-gray-200"
                                 onError={(e) => {
@@ -636,7 +644,7 @@ export default function Products() {
               {/* Giá và số lượng */}
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold mb-4 text-gray-900">Giá và kho hàng</h3>
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-2 text-gray-700">
                       Giá nhập <span className="text-red-500">*</span>
@@ -668,18 +676,6 @@ export default function Products() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-2 text-gray-700">Giá khuyến mãi</label>
-                    <input 
-                      name="GiaKhuyenMai" 
-                      type="number"
-                      min="0"
-                      step="1000"
-                      defaultValue={editingProduct?.GiaKhuyenMai}
-                      placeholder="0"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" 
-                    />
-                  </div>
-                  <div>
                     <label className="block text-sm font-medium mb-2 text-gray-700">
                       Số lượng <span className="text-red-500">*</span>
                     </label>
@@ -694,6 +690,25 @@ export default function Products() {
                     />
                   </div>
                 </div>
+                <p className="mt-3 text-xs text-amber-700">Tồn kho không nhập ở đây. Khi có biến thể, hãy nhập hàng theo SKU biến thể trong kho.</p>
+              </div>
+
+              <div className="border-t pt-6">
+                <div className="flex items-center justify-between gap-3 mb-2"><div><h3 className="text-lg font-semibold text-gray-900">Biến thể bán</h3><p className="text-xs text-gray-500 mt-1">Chỉ khai báo tổ hợp thực tế. SKU, giá và ảnh của biến thể được lưu riêng; tồn lấy từ lô hàng.</p></div><button type="button" onClick={addVariant} className="px-3 py-2 rounded-lg bg-pink-600 text-white text-sm font-semibold">+ Thêm biến thể</button></div>
+                {variants.length === 0 ? <p className="text-sm rounded-lg bg-slate-50 border border-slate-200 p-3 text-slate-600">Sản phẩm chưa có lựa chọn. Hệ thống dùng thông tin và giá chung của sản phẩm.</p> : <div className="space-y-3">{variants.map((variant, index) => <div key={variant.MaBienThe || `new-${index}`} className="rounded-lg border border-gray-200 p-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <input value={variant.MaSKU || ''} onChange={e=>updateVariant(index,'MaSKU',e.target.value)} placeholder="SKU *" className="px-3 py-2 border rounded-lg" />
+                  <input type="number" min="0" value={variant.GiaBan ?? ''} onChange={e=>updateVariant(index,'GiaBan',e.target.value)} placeholder="Giá bán *" className="px-3 py-2 border rounded-lg" />
+                  <input type="number" min="0" value={variant.DungTich ?? ''} onChange={e=>updateVariant(index,'DungTich',e.target.value)} placeholder="Dung tích" className="px-3 py-2 border rounded-lg" />
+                  <select value={variant.DonViDungTich || 'ml'} onChange={e=>updateVariant(index,'DonViDungTich',e.target.value)} className="px-3 py-2 border rounded-lg"><option>ml</option><option>l</option></select>
+                  <input type="number" min="0" value={variant.KhoiLuong ?? ''} onChange={e=>updateVariant(index,'KhoiLuong',e.target.value)} placeholder="Khối lượng" className="px-3 py-2 border rounded-lg" />
+                  <select value={variant.DonViKhoiLuong || 'g'} onChange={e=>updateVariant(index,'DonViKhoiLuong',e.target.value)} className="px-3 py-2 border rounded-lg"><option>g</option><option>kg</option></select>
+                  <input value={variant.TenMau || ''} onChange={e=>updateVariant(index,'TenMau',e.target.value)} placeholder="Tên/mã màu" className="px-3 py-2 border rounded-lg" />
+                  <input value={variant.MaHEX || ''} onChange={e=>updateVariant(index,'MaHEX',e.target.value)} placeholder="#RRGGBB" className="px-3 py-2 border rounded-lg" />
+                  <input value={variant.MuiHuong || ''} onChange={e=>updateVariant(index,'MuiHuong',e.target.value)} placeholder="Mùi hương" className="px-3 py-2 border rounded-lg" />
+                  <input value={variant.QuyCachDongGoi || ''} onChange={e=>updateVariant(index,'QuyCachDongGoi',e.target.value)} placeholder="Quy cách đóng gói" className="px-3 py-2 border rounded-lg" />
+                  <input value={variant.HinhAnh || ''} onChange={e=>updateVariant(index,'HinhAnh',e.target.value)} placeholder="URL ảnh biến thể" className="px-3 py-2 border rounded-lg md:col-span-2" />
+                  <div className="flex items-center gap-2"><label className="text-sm"><input type="checkbox" checked={Number(variant.TrangThai)===1} onChange={e=>updateVariant(index,'TrangThai',e.target.checked?1:0)} /> Đang bán</label><button type="button" onClick={()=>setVariants(rows=>rows.filter((_,i)=>i!==index))} className="text-sm text-red-600">Gỡ khỏi danh sách</button></div>
+                </div>)}</div>}
               </div>
 
               {/* Chi tiết sản phẩm */}

@@ -1,127 +1,83 @@
-import { Router } from 'express';
-import { query, queryOne, execute } from '../config/database';
+import { Router } from "express";
+import { execute, query, queryOne, getPool, sql } from "../config/database";
+import { AuthRequest, authorizeRoles } from "../middleware/auth";
+import { promotionForProduct } from "../services/khuyenmai";
 
 const router = Router();
-
-// GET all promotions
-router.get('/', async (req, res) => {
+const staff = authorizeRoles("Admin", "NhanVien");
+const admin = authorizeRoles("Admin");
+const scopeTables: Record<string, { table: string; key: string }> = {
+  DANH_MUC: { table: "KhuyenMaiDanhMuc", key: "MaDanhMuc" },
+  SAN_PHAM: { table: "KhuyenMaiSanPham", key: "MaSanPham" },
+  THUONG_HIEU: { table: "KhuyenMaiThuongHieu", key: "ThuongHieu" },
+};
+const statusExpr = (a = "") => `(CASE WHEN ${a}TrangThai='NHAP' AND ${a}TuDongKichHoat=0 THEN 'NHAP' WHEN ${a}TrangThai IN ('TAM_DUNG','DA_HUY') THEN ${a}TrangThai WHEN ${a}TongLuot IS NOT NULL AND ${a}LuotDaGiu+${a}LuotDaSuDung>=${a}TongLuot THEN 'HET_SO_LUONG' WHEN SYSDATETIME()<${a}NgayBatDau THEN 'CHO_AP_DUNG' WHEN SYSDATETIME()>=${a}NgayKetThuc THEN 'KET_THUC' ELSE 'DANG_HOAT_DONG' END)`;
+function fail(res: any, e: any) { res.status(e.status || 400).json({ success: false, message: e.message || "Dữ liệu chương trình không hợp lệ" }); }
+function validate(body: any) {
+  const types = ["GIAM_PHAN_TRAM", "GIAM_CO_DINH", "DONG_GIA", "MUA_X_TANG_Y", "COMBO"];
+  const scopes = ["TOAN_BO", "DANH_MUC", "SAN_PHAM", "THUONG_HIEU"];
+  const type = String(body.LoaiKhuyenMai || ""); const scope = String(body.PhamVi || "");
+  const start = new Date(body.NgayBatDau); const end = new Date(body.NgayKetThuc);
+  if (!body.MaChuongTrinh?.trim() || !body.TenChuongTrinh?.trim()) throw new Error("Mã và tên chương trình là bắt buộc");
+  if (!types.includes(type) || !scopes.includes(scope)) throw new Error("Loại khuyến mại hoặc phạm vi không hợp lệ");
+  if (!Number.isFinite(+start) || !Number.isFinite(+end) || end <= start) throw new Error("Thời gian kết thúc phải sau thời gian bắt đầu");
+  const value = Number(body.GiaTri || 0);
+  if (!Number.isFinite(value) || value < 0 || (type === "GIAM_PHAN_TRAM" && (value < 1 || value > 100)) || (type === "DONG_GIA" && value <= 0)) throw new Error("Giá trị ưu đãi không hợp lệ");
+  if (scope !== "TOAN_BO" && (!Array.isArray(body.DoiTuongApDung) || body.DoiTuongApDung.length === 0)) throw new Error("Hãy chọn ít nhất một đối tượng áp dụng");
+  if (type === "MUA_X_TANG_Y" && (!Array.isArray(body.QuaTang) || !body.QuaTang.length || body.QuaTang.some((x: any) => +x.SoLuongMua < 1 || +x.SoLuongTang < 1))) throw new Error("Khuyến mại mua X tặng Y cần sản phẩm mua/tặng và số lượng hợp lệ");
+  if (type === "COMBO" && (!Array.isArray(body.Combo) || body.Combo.length < 2 || body.Combo.some((x: any) => +x.SoLuong < 1))) throw new Error("Combo cần ít nhất hai sản phẩm và số lượng hợp lệ");
+  if (body.TuDongKichHoat && ["MUA_X_TANG_Y","COMBO"].includes(type)) throw new Error("Tự động kích hoạt cho quà tặng/combo chỉ khả dụng sau khi checkout hỗ trợ giữ tồn theo dòng hàng riêng");
+  return { ...body, LoaiKhuyenMai: type, PhamVi: scope, GiaTri: value, NgayBatDau: start, NgayKetThuc: end };
+}
+async function replaceScope(tx: sql.Transaction, id: number, b: any) {
+  for (const s of Object.values(scopeTables)) await new sql.Request(tx).input("id", sql.Int, id).query(`DELETE FROM dbo.${s.table} WHERE KhuyenMaiId=@id`);
+  if (b.PhamVi !== "TOAN_BO") {
+    const s = scopeTables[b.PhamVi];
+    for (const v of [...new Set(b.DoiTuongApDung.map((x: any) => String(x).trim()).filter(Boolean))])
+      await new sql.Request(tx).input("id", sql.Int, id).input("value", b.PhamVi === "THUONG_HIEU" ? sql.NVarChar(160) : sql.Int, b.PhamVi === "THUONG_HIEU" ? v : Number(v)).query(`INSERT INTO dbo.${s.table}(KhuyenMaiId,${s.key}) VALUES(@id,@value)`);
+  }
+  await new sql.Request(tx).input("id", sql.Int, id).query("DELETE FROM dbo.QuaTangKhuyenMai WHERE KhuyenMaiId=@id; DELETE FROM dbo.ChiTietCombo WHERE KhuyenMaiId=@id");
+  for (const g of b.QuaTang || []) await new sql.Request(tx).input("id", sql.Int, id).input("buy", sql.Int, +g.MaSanPhamMua).input("x", sql.Int, +g.SoLuongMua).input("gift", sql.Int, +g.MaSanPhamTang).input("y", sql.Int, +g.SoLuongTang).query("INSERT INTO dbo.QuaTangKhuyenMai VALUES(@id,@buy,@x,@gift,@y)");
+  for (const c of b.Combo || []) await new sql.Request(tx).input("id", sql.Int, id).input("product", sql.Int, +c.MaSanPham).input("qty", sql.Int, +c.SoLuong).query("INSERT INTO dbo.ChiTietCombo VALUES(@id,@product,@qty)");
+}
+async function save(req: AuthRequest, id?: number) {
+  const b = validate(req.body); const pool = await getPool(); const tx = new sql.Transaction(pool); await tx.begin();
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    const search = (req.query.search as string) || '';
-    const offset = (page - 1) * limit;
-
-    let where = 'WHERE 1=1';
-    const params: any = { offset, limit };
-
-    if (search) {
-      where += ` AND (TenKhuyenMai LIKE @search OR MoTa LIKE @search)`;
-      params.search = `%${search}%`;
+    let programId = id;
+    if (id) {
+      const existing = (await new sql.Request(tx).input("id", sql.Int, id).query("SELECT * FROM dbo.KhuyenMai WITH(UPDLOCK,HOLDLOCK) WHERE Id=@id")).recordset[0];
+      if (!existing) throw Object.assign(new Error("Không tìm thấy chương trình"), { status: 404 });
+      if (existing.LuotDaGiu || existing.LuotDaSuDung) throw Object.assign(new Error("Đã có đơn sử dụng/giữ suất; không thể sửa điều kiện chương trình"), { status: 409 });
+      await new sql.Request(tx).input("id", sql.Int, id).input("b", sql.NVarChar(50), b.MaChuongTrinh).input("n", sql.NVarChar(160), b.TenChuongTrinh).input("desc", sql.NVarChar(1000), b.MoTa || null).input("banner", sql.NVarChar(500), b.Banner || null).input("type", sql.VarChar(24), b.LoaiKhuyenMai).input("value", sql.Decimal(18,2), b.GiaTri).input("cap", sql.Decimal(18,2), b.GiamToiDa || null).input("min", sql.Decimal(18,2), Number(b.DonToiThieu || 0)).input("start", sql.DateTime2, b.NgayBatDau).input("end", sql.DateTime2, b.NgayKetThuc).input("total", sql.Int, b.TongLuot || null).input("per", sql.Int, b.MoiKhachToiDa || null).input("priority", sql.Int, Number(b.DoUuTien || 0)).input("scope", sql.VarChar(16), b.PhamVi).input("combine", sql.Bit, b.ChoPhepKetHopVoucher !== false).input("auto", sql.Bit, Boolean(b.TuDongKichHoat)).input("user", sql.Int, req.user!.MaTaiKhoan).query(`UPDATE dbo.KhuyenMai SET MaChuongTrinh=@b,TenChuongTrinh=@n,MoTa=@desc,Banner=@banner,LoaiKhuyenMai=@type,GiaTri=@value,GiamToiDa=@cap,DonToiThieu=@min,NgayBatDau=@start,NgayKetThuc=@end,TongLuot=@total,MoiKhachToiDa=@per,DoUuTien=@priority,PhamVi=@scope,ChoPhepKetHopVoucher=@combine,TuDongKichHoat=@auto,TrangThai=CASE WHEN TrangThai='NHAP' THEN 'NHAP' ELSE TrangThai END,UpdatedAt=SYSDATETIME(),UpdatedBy=@user WHERE Id=@id`);
+    } else {
+      const inserted = await new sql.Request(tx).input("b", sql.NVarChar(50), b.MaChuongTrinh).input("n", sql.NVarChar(160), b.TenChuongTrinh).input("desc", sql.NVarChar(1000), b.MoTa || null).input("banner", sql.NVarChar(500), b.Banner || null).input("type", sql.VarChar(24), b.LoaiKhuyenMai).input("value", sql.Decimal(18,2), b.GiaTri).input("cap", sql.Decimal(18,2), b.GiamToiDa || null).input("min", sql.Decimal(18,2), Number(b.DonToiThieu || 0)).input("start", sql.DateTime2, b.NgayBatDau).input("end", sql.DateTime2, b.NgayKetThuc).input("total", sql.Int, b.TongLuot || null).input("per", sql.Int, b.MoiKhachToiDa || null).input("priority", sql.Int, Number(b.DoUuTien || 0)).input("scope", sql.VarChar(16), b.PhamVi).input("combine", sql.Bit, b.ChoPhepKetHopVoucher !== false).input("auto", sql.Bit, Boolean(b.TuDongKichHoat)).input("user", sql.Int, req.user!.MaTaiKhoan).query(`INSERT dbo.KhuyenMai(MaChuongTrinh,TenChuongTrinh,MoTa,Banner,LoaiKhuyenMai,GiaTri,GiamToiDa,DonToiThieu,NgayBatDau,NgayKetThuc,TongLuot,MoiKhachToiDa,DoUuTien,PhamVi,ChoPhepKetHopVoucher,TuDongKichHoat,TrangThai,CreatedBy,UpdatedBy) OUTPUT INSERTED.Id VALUES(@b,@n,@desc,@banner,@type,@value,@cap,@min,@start,@end,@total,@per,@priority,@scope,@combine,@auto,'NHAP',@user,@user)`);
+      programId = inserted.recordset[0].Id;
     }
+    await replaceScope(tx, programId!, b);
+    await new sql.Request(tx).input("id", sql.Int, programId).input("user", sql.Int, req.user!.MaTaiKhoan).input("action", sql.VarChar(24), id ? "CAP_NHAT" : "TAO_MOI").query("INSERT dbo.LichSuThayDoiKhuyenMai(KhuyenMaiId,MaTaiKhoan,HanhDong) VALUES(@id,@user,@action)");
+    await tx.commit(); return programId;
+  } catch (e) { await tx.rollback(); throw e; }
+}
 
-    // Dùng bảng SanPham.GiaKhuyenMai đang có sẵn — tạo bảng KhuyenMai logic từ sản phẩm
-    const data = await query(`
-      SELECT
-        MaSanPham         AS MaKhuyenMai,
-        TenSanPham        AS TenSanPham,
-        GiaBan            AS GiaBan,
-        GiaKhuyenMai      AS GiaKhuyenMai,
-        CASE 
-          WHEN GiaBan > 0 AND GiaKhuyenMai IS NOT NULL AND GiaKhuyenMai > 0
-          THEN CAST(ROUND((GiaBan - GiaKhuyenMai) * 100.0 / GiaBan, 0) AS INT)
-          ELSE 0
-        END               AS PhanTramGiam,
-        HinhAnh,
-        TrangThai
-      FROM SanPham
-      WHERE GiaKhuyenMai IS NOT NULL AND GiaKhuyenMai > 0
-        AND GiaKhuyenMai < GiaBan
-      ORDER BY PhanTramGiam DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `, { offset, limit });
+// Customer endpoints are declared before /:id to prevent route capture.
+router.get("/dang-hoat-dong", authorizeRoles("KhachHang"), async (_req, res) => { try { const data = await query(`SELECT Id,MaChuongTrinh,TenChuongTrinh,MoTa,Banner,LoaiKhuyenMai,GiaTri,GiamToiDa,NgayBatDau,NgayKetThuc,PhamVi FROM dbo.KhuyenMai WHERE ${statusExpr()}='DANG_HOAT_DONG' ORDER BY DoUuTien DESC,NgayBatDau`); res.json({ success: true, data }); } catch (e:any) { res.status(500).json({success:false,message:e.message}); } });
+router.get("/san-pham/:sanPhamId", authorizeRoles("KhachHang"), async (req, res) => { try { const p = await queryOne<any>("SELECT MaSanPham,MaDanhMuc,ThuongHieu,GiaBan,SoLuong FROM dbo.SanPham WHERE MaSanPham=@id AND TrangThai=1 AND IsDeleted=0", { id: Number(req.params.sanPhamId) }); if (!p) return res.status(404).json({success:false,message:"Không tìm thấy sản phẩm"}); const applied = await promotionForProduct(p); res.json({success:true,data:applied}); } catch(e:any) { res.status(500).json({success:false,message:e.message}); } });
+router.post("/tinh-gia-gio-hang", authorizeRoles("KhachHang"), async (req, res) => { try { const lines = Array.isArray(req.body.items) ? req.body.items : []; const data=[]; for(const line of lines){ const p=await queryOne<any>("SELECT MaSanPham,MaDanhMuc,ThuongHieu,GiaBan,SoLuong FROM dbo.SanPham WHERE MaSanPham=@id AND TrangThai=1 AND IsDeleted=0",{id:Number(line.MaSanPham)}); if(!p) continue; const qty=Math.max(1,Math.min(99,Number(line.SoLuong)||1)); const km=await promotionForProduct({...p,SoLuong:qty}); data.push({MaSanPham:p.MaSanPham,GiaGoc:Number(p.GiaBan),GiaKhuyenMai:km?.price??Number(p.GiaBan),TienGiamKhuyenMai:(km?.discount??0)*qty,SoLuong:qty,KhuyenMai:km}); } res.json({success:true,data}); } catch(e:any) {res.status(500).json({success:false,message:e.message});} });
+router.get("/:id/chi-tiet", authorizeRoles("KhachHang"), async (req,res)=>{try{const data=await queryOne<any>(`SELECT *,${statusExpr()} TrangThaiHienTai FROM dbo.KhuyenMai WHERE Id=@id`,{id:Number(req.params.id)});if(!data)return res.status(404).json({success:false,message:"Không tìm thấy chương trình"});res.json({success:true,data})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
 
-    const countResult = await queryOne<{ total: number }>(`
-      SELECT COUNT(*) as total FROM SanPham
-      WHERE GiaKhuyenMai IS NOT NULL AND GiaKhuyenMai > 0 AND GiaKhuyenMai < GiaBan
-    `, {});
-
-    res.json({
-      success: true,
-      data,
-      pagination: {
-        page, limit,
-        total: countResult?.total || 0,
-        totalPages: Math.ceil((countResult?.total || 0) / limit)
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// GET stats
-router.get('/stats', async (req, res) => {
-  try {
-    const total = await queryOne<{ total: number }>(
-      `SELECT COUNT(*) as total FROM SanPham WHERE GiaKhuyenMai IS NOT NULL AND GiaKhuyenMai > 0 AND GiaKhuyenMai < GiaBan`, {}
-    ) || { total: 0 };
-
-    const avgDiscount = await queryOne<{ avg: number }>(
-      `SELECT CAST(AVG(CASE WHEN GiaBan > 0 THEN (GiaBan - GiaKhuyenMai) * 100.0 / GiaBan ELSE 0 END) AS INT) as avg
-       FROM SanPham WHERE GiaKhuyenMai IS NOT NULL AND GiaKhuyenMai > 0 AND GiaKhuyenMai < GiaBan`, {}
-    ) || { avg: 0 };
-
-    const maxDiscount = await queryOne<{ max: number }>(
-      `SELECT CAST(MAX((GiaBan - GiaKhuyenMai) * 100.0 / GiaBan) AS INT) as max
-       FROM SanPham WHERE GiaKhuyenMai IS NOT NULL AND GiaKhuyenMai > 0 AND GiaKhuyenMai < GiaBan`, {}
-    ) || { max: 0 };
-
-    res.json({
-      success: true,
-      data: {
-        tongSanPhamKhuyenMai: total.total,
-        giaGiamTrungBinh: avgDiscount.avg,
-        giaGiamCaoNhat: maxDiscount.max
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// PUT update gia khuyen mai cho san pham
-router.put('/:id', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { GiaKhuyenMai } = req.body;
-
-    const sp = await queryOne<{ MaSanPham: number; GiaBan: number }>(`SELECT MaSanPham, GiaBan FROM SanPham WHERE MaSanPham = @id`, { id });
-    if (!sp) return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
-
-    if (GiaKhuyenMai !== null && GiaKhuyenMai !== undefined && Number(GiaKhuyenMai) >= sp.GiaBan) {
-      return res.status(400).json({ success: false, message: 'Giá khuyến mãi phải nhỏ hơn giá bán' });
-    }
-
-    await execute(
-      `UPDATE SanPham SET GiaKhuyenMai = @gia WHERE MaSanPham = @id`,
-      { gia: GiaKhuyenMai || null, id }
-    );
-
-    res.json({ success: true, message: 'Cập nhật giá khuyến mãi thành công' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// DELETE (xoa khuyen mai - set GiaKhuyenMai = NULL)
-router.delete('/:id', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await execute(`UPDATE SanPham SET GiaKhuyenMai = NULL WHERE MaSanPham = @id`, { id });
-    res.json({ success: true, message: 'Đã xóa khuyến mãi cho sản phẩm' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
+router.get("/thong-ke", staff, async (_req,res)=>{try{const data=await queryOne<any>(`SELECT SUM(CASE WHEN ${statusExpr()}='DANG_HOAT_DONG' THEN 1 ELSE 0 END) DangHoatDong,SUM(CASE WHEN ${statusExpr()}='CHO_AP_DUNG' THEN 1 ELSE 0 END) SapDienRa,SUM(CASE WHEN ${statusExpr()} IN('KET_THUC','HET_SO_LUONG') THEN 1 ELSE 0 END) DaKetThuc,
+  (SELECT COUNT(*) FROM dbo.SanPham sp WHERE sp.TrangThai=1 AND sp.IsDeleted=0 AND EXISTS(SELECT 1 FROM dbo.KhuyenMai k WHERE ${statusExpr("k.")}='DANG_HOAT_DONG' AND (k.PhamVi='TOAN_BO' OR (k.PhamVi='SAN_PHAM' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiSanPham x WHERE x.KhuyenMaiId=k.Id AND x.MaSanPham=sp.MaSanPham)) OR (k.PhamVi='DANH_MUC' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiDanhMuc x WHERE x.KhuyenMaiId=k.Id AND x.MaDanhMuc=sp.MaDanhMuc)) OR (k.PhamVi='THUONG_HIEU' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiThuongHieu x WHERE x.KhuyenMaiId=k.Id AND x.ThuongHieu=sp.ThuongHieu))))) SanPhamDangGiam,
+  ISNULL((SELECT SUM(ct.DonGia*ct.SoLuong) FROM dbo.ChiTietHoaDon ct JOIN dbo.HoaDon hd ON hd.MaHoaDon=ct.MaHoaDon WHERE ct.KhuyenMaiId IS NOT NULL AND hd.TrangThai<>'DA_HUY'),0) DoanhThuKhuyenMai FROM dbo.KhuyenMai`);res.json({success:true,data})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
+router.get("/", staff, async(req,res)=>{try{const page=Math.max(1,Number(req.query.page)||1),limit=Math.min(100,Math.max(1,Number(req.query.limit)||10)),search=String(req.query.search||"");const status=String(req.query.trangThai||"");const params:any={offset:(page-1)*limit,limit};const where=["1=1"];if(search){where.push("(km.MaChuongTrinh LIKE @search OR km.TenChuongTrinh LIKE @search)");params.search=`%${search}%`;}if(status){where.push(`${statusExpr("km.")}=@status`);params.status=status;}if(req.query.loai){where.push("km.LoaiKhuyenMai=@type");params.type=req.query.loai;}if(req.query.phamVi){where.push("km.PhamVi=@scope");params.scope=req.query.phamVi;}if(req.query.tuNgay){where.push("km.NgayKetThuc>=TRY_CONVERT(datetime2,@tuNgay)");params.tuNgay=String(req.query.tuNgay);}if(req.query.denNgay){where.push("km.NgayBatDau<DATEADD(day,1,TRY_CONVERT(datetime2,@denNgay))");params.denNgay=String(req.query.denNgay);}const w=where.join(" AND ");const total=(await queryOne<any>(`SELECT COUNT(*) total FROM dbo.KhuyenMai km WHERE ${w}`,params))?.total||0;const data=await query<any>(`SELECT km.*,(SELECT COUNT(*) FROM dbo.HoaDonKhuyenMai h WHERE h.KhuyenMaiId=km.Id) SoDon,${statusExpr("km.")} TrangThaiHienTai,preview.HinhAnh HinhAnhSanPham,preview.TenSanPham TenSanPhamDaiDien FROM dbo.KhuyenMai km OUTER APPLY(SELECT TOP 1 sp.HinhAnh,sp.TenSanPham FROM dbo.SanPham sp WHERE sp.TrangThai=1 AND sp.IsDeleted=0 AND (km.PhamVi='TOAN_BO' OR (km.PhamVi='SAN_PHAM' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiSanPham x WHERE x.KhuyenMaiId=km.Id AND x.MaSanPham=sp.MaSanPham)) OR (km.PhamVi='DANH_MUC' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiDanhMuc x WHERE x.KhuyenMaiId=km.Id AND x.MaDanhMuc=sp.MaDanhMuc)) OR (km.PhamVi='THUONG_HIEU' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiThuongHieu x WHERE x.KhuyenMaiId=km.Id AND x.ThuongHieu=sp.ThuongHieu))) ORDER BY sp.MaSanPham) preview WHERE ${w} ORDER BY km.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`,params);res.json({success:true,data,pagination:{page,limit,total,totalPages:Math.max(1,Math.ceil(total/limit))}})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
+router.get("/:id/san-pham-trung",staff,async(req,res)=>{try{const data=await query<any>(`SELECT DISTINCT sp.MaSanPham,sp.TenSanPham,other.Id KhuyenMaiId,other.MaChuongTrinh,other.TenChuongTrinh,other.DoUuTien FROM dbo.SanPham sp JOIN dbo.KhuyenMai cur ON cur.Id=@id JOIN dbo.KhuyenMai other ON other.Id<>cur.Id WHERE ${statusExpr("other.")}='DANG_HOAT_DONG' AND ${statusExpr("cur.")}='DANG_HOAT_DONG' AND
+  ((cur.PhamVi='TOAN_BO') OR (cur.PhamVi='SAN_PHAM' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiSanPham x WHERE x.KhuyenMaiId=cur.Id AND x.MaSanPham=sp.MaSanPham)) OR (cur.PhamVi='DANH_MUC' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiDanhMuc x WHERE x.KhuyenMaiId=cur.Id AND x.MaDanhMuc=sp.MaDanhMuc)) OR (cur.PhamVi='THUONG_HIEU' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiThuongHieu x WHERE x.KhuyenMaiId=cur.Id AND x.ThuongHieu=sp.ThuongHieu))) AND
+  ((other.PhamVi='TOAN_BO') OR (other.PhamVi='SAN_PHAM' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiSanPham x WHERE x.KhuyenMaiId=other.Id AND x.MaSanPham=sp.MaSanPham)) OR (other.PhamVi='DANH_MUC' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiDanhMuc x WHERE x.KhuyenMaiId=other.Id AND x.MaDanhMuc=sp.MaDanhMuc)) OR (other.PhamVi='THUONG_HIEU' AND EXISTS(SELECT 1 FROM dbo.KhuyenMaiThuongHieu x WHERE x.KhuyenMaiId=other.Id AND x.ThuongHieu=sp.ThuongHieu))) ORDER BY sp.TenSanPham,other.DoUuTien DESC`,{id:Number(req.params.id)});res.json({success:true,data})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
+router.get("/:id/don-hang",staff,async(req,res)=>{try{const data=await query<any>("SELECT hk.*,hd.NgayLap,hd.TrangThai FROM dbo.HoaDonKhuyenMai hk JOIN dbo.HoaDon hd ON hd.MaHoaDon=hk.MaHoaDon WHERE hk.KhuyenMaiId=@id ORDER BY hd.NgayLap DESC",{id:Number(req.params.id)});res.json({success:true,data})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
+router.get("/:id/hieu-qua",staff,async(req,res)=>{try{const data=await queryOne<any>("SELECT COUNT(DISTINCT MaHoaDon) SoDon,SUM(TienGiam) TongTienGiam FROM dbo.HoaDonKhuyenMai WHERE KhuyenMaiId=@id",{id:Number(req.params.id)});res.json({success:true,data})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
+router.get("/:id",staff,async(req,res)=>{try{const id=Number(req.params.id);const program=await queryOne<any>(`SELECT km.*,${statusExpr("km.")} TrangThaiHienTai FROM dbo.KhuyenMai km WHERE Id=@id`,{id});if(!program)return res.status(404).json({success:false,message:"Không tìm thấy chương trình"});const scope=scopeTables[program.PhamVi];const targets=scope?await query<any>(`SELECT ${scope.key} value FROM dbo.${scope.table} WHERE KhuyenMaiId=@id`,{id}):[];const gifts=await query<any>("SELECT * FROM dbo.QuaTangKhuyenMai WHERE KhuyenMaiId=@id",{id});const combo=await query<any>("SELECT * FROM dbo.ChiTietCombo WHERE KhuyenMaiId=@id",{id});const audit=await query<any>("SELECT TOP 50 * FROM dbo.LichSuThayDoiKhuyenMai WHERE KhuyenMaiId=@id ORDER BY CreatedAt DESC",{id});res.json({success:true,data:{...program,DoiTuongApDung:targets.map(x=>x.value),QuaTang:gifts,Combo:combo,LichSu:audit}})}catch(e:any){res.status(500).json({success:false,message:e.message})}});
+router.post("/",admin,async(req:AuthRequest,res)=>{try{const id=await save(req);res.status(201).json({success:true,data:{Id:id}})}catch(e:any){fail(res,e)}});
+router.put("/:id",admin,async(req:AuthRequest,res)=>{try{const id=Number(req.params.id);await save(req,id);res.json({success:true,data:{Id:id}})}catch(e:any){fail(res,e)}});
+router.post("/:id/sao-chep",admin,async(req:AuthRequest,res)=>{try{const source=await queryOne<any>("SELECT * FROM dbo.KhuyenMai WHERE Id=@id",{id:Number(req.params.id)});if(!source)return res.status(404).json({success:false,message:"Không tìm thấy chương trình"});const scope=scopeTables[source.PhamVi];const targets=scope?await query<any>(`SELECT ${scope.key} value FROM dbo.${scope.table} WHERE KhuyenMaiId=@id`,{id:source.Id}):[];const gifts=await query<any>("SELECT MaSanPhamMua,SoLuongMua,MaSanPhamTang,SoLuongTang FROM dbo.QuaTangKhuyenMai WHERE KhuyenMaiId=@id",{id:source.Id});const combo=await query<any>("SELECT MaSanPham,SoLuong FROM dbo.ChiTietCombo WHERE KhuyenMaiId=@id",{id:source.Id});const body={...source,...req.body,MaChuongTrinh:req.body.MaChuongTrinh||`${source.MaChuongTrinh}-COPY-${Date.now().toString().slice(-5)}`,TenChuongTrinh:req.body.TenChuongTrinh||`${source.TenChuongTrinh} (bản sao)`,TrangThai:"NHAP",DoiTuongApDung:targets.map(x=>String(x.value)),QuaTang:gifts,Combo:combo};const fakeReq={...req,body};const id=await save(fakeReq as AuthRequest);res.status(201).json({success:true,data:{Id:id}})}catch(e:any){fail(res,e)}});
+for(const [path,state] of [["kich-hoat","DANG_HOAT_DONG"],["tam-dung","TAM_DUNG"],["ket-thuc","KET_THUC"],["huy","DA_HUY"]] as const){router.patch(`/:id/${path}`,admin,async(req:AuthRequest,res)=>{try{const id=Number(req.params.id);const updated=await execute(`UPDATE dbo.KhuyenMai SET TrangThai=@state,UpdatedAt=SYSDATETIME(),UpdatedBy=@user WHERE Id=@id AND TrangThai<>'DA_HUY' AND (@state<>'DANG_HOAT_DONG' OR (LoaiKhuyenMai IN('GIAM_PHAN_TRAM','GIAM_CO_DINH','DONG_GIA') AND NgayKetThuc>SYSDATETIME() AND (TongLuot IS NULL OR LuotDaGiu+LuotDaSuDung<TongLuot)))`,{id,state,user:req.user!.MaTaiKhoan});if(!updated.rowsAffected){const p=await queryOne<any>("SELECT LoaiKhuyenMai FROM dbo.KhuyenMai WHERE Id=@id",{id});const message=p&&["MUA_X_TANG_Y","COMBO"].includes(p.LoaiKhuyenMai)?"Mua X tặng Y/Combo chưa thể kích hoạt vì checkout chưa hỗ trợ hàng quà tặng và phân bổ tồn từng thành phần":"Không thể chuyển trạng thái ở thời điểm hiện tại";return res.status(409).json({success:false,message})}await execute("INSERT dbo.LichSuThayDoiKhuyenMai(KhuyenMaiId,MaTaiKhoan,HanhDong) VALUES(@id,@user,@state)",{id,user:req.user!.MaTaiKhoan,state});res.json({success:true})}catch(e:any){res.status(500).json({success:false,message:e.message})}})}
 
 export default router;

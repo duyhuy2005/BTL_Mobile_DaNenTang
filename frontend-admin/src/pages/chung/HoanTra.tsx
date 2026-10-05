@@ -1,308 +1,75 @@
-import axios from 'axios';
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { returnsAPI, API_BASE_URL } from '../../services/api';
 import { formatCurrency } from '../../utils/format';
 
-const API = 'http://localhost:3000/api';
-const getToken = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
+type ReturnRow = { Id:number; MaYeuCau:string; MaHoaDonHienThi:string; TenKhachHang:string; SoDienThoai:string; LyDo:string; MoTa:string; LoaiYeuCau:string; TrangThai:string; NgayYeuCau:string; SoTienDuKien:number; TenSanPhamDau:string; HinhAnhDau?:string; SoSanPham:number };
+type Page = { page:number; limit:number; total:number; totalPages:number };
+const LABEL:Record<string,string>={CHO_DUYET:'Chờ duyệt',DA_DUYET:'Đã duyệt',TU_CHOI:'Từ chối',CHO_KHACH_GUI_HANG:'Chờ khách gửi hàng',CHO_LAY_HANG_HOAN:'Chờ lấy hàng hoàn',DA_LAY_HANG_HOAN:'Đã lấy hàng hoàn',DANG_HOAN_VE:'Đang hoàn về',DA_NHAN_HANG_HOAN:'Chờ kiểm tra',DANG_KIEM_TRA:'Đang kiểm tra',CHAP_NHAN_HOAN:'Chờ xử lý kho',TU_CHOI_SAU_KIEM_TRA:'Từ chối sau kiểm tra',CHO_HOAN_TIEN:'Chờ hoàn tiền',DANG_HOAN_TIEN:'Đang hoàn tiền',DA_HOAN_TIEN:'Đã hoàn tiền',HOAN_TIEN_THAT_BAI:'Hoàn tiền thất bại',DA_DOI_HANG:'Đã đổi hàng',HOAN_TAT:'Hoàn tất',DA_HUY:'Đã hủy'};
+const TONE:Record<string,string>={CHO_DUYET:'bg-pink-100 text-pink-700',DA_DUYET:'bg-green-100 text-green-700',CHO_KHACH_GUI_HANG:'bg-blue-100 text-blue-700',CHO_LAY_HANG_HOAN:'bg-amber-100 text-amber-700',DA_LAY_HANG_HOAN:'bg-blue-100 text-blue-700',DANG_HOAN_VE:'bg-blue-100 text-blue-700',DA_NHAN_HANG_HOAN:'bg-orange-100 text-orange-700',DANG_KIEM_TRA:'bg-orange-100 text-orange-700',CHAP_NHAN_HOAN:'bg-violet-100 text-violet-700',CHO_HOAN_TIEN:'bg-green-100 text-green-700',DANG_HOAN_TIEN:'bg-green-100 text-green-700',DA_HOAN_TIEN:'bg-slate-100 text-slate-600',TU_CHOI:'bg-red-100 text-red-700',TU_CHOI_SAU_KIEM_TRA:'bg-red-100 text-red-700',DA_HUY:'bg-slate-100 text-slate-600',HOAN_TAT:'bg-slate-100 text-slate-600'};
+const RETURN_REASONS:Record<string,string>={GIAO_SAI:'Giao sai sản phẩm',GIAO_THIEU:'Giao thiếu sản phẩm',HU_HONG:'Sản phẩm hư hỏng',HET_HAN_CHAT_LUONG:'Hết hạn/lỗi chất lượng',KHONG_DUNG_MO_TA:'Không đúng mô tả',DI_UNG:'Dị ứng/kích ứng',DOI_Y:'Khách đổi ý'};
+const imageUrl=(value?:string)=>!value?'':value.startsWith('http')?value:`${API_BASE_URL.replace(/\/api\/?$/,'')}${value.startsWith('/')?value:`/${value}`}`;
+const errorMessage=(e:any)=>e?.response?.data?.message||e?.message||'Không thể kết nối máy chủ';
+const today=(value?:string)=>value?new Date(value).toLocaleDateString('vi-VN'): '—';
+function Modal({title,close,children}:{title:string;close:()=>void;children:React.ReactNode}){return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"><div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><h3 className="font-bold text-slate-800">{title}</h3><button onClick={close} className="text-2xl text-slate-400">×</button></div><div className="p-5">{children}</div></div></div>}
+function Status({value}:{value:string}){return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${TONE[value]||'bg-slate-100 text-slate-600'}`}>{LABEL[value]||value}</span>}
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  'Cho xu ly':    { label: 'Chờ xử lý',        color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-  'Chờ xử lý':   { label: 'Chờ xử lý',        color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-  'Tiep nhan':    { label: 'Đang tiếp nhận',   color: 'bg-blue-100   text-blue-700   border-blue-200'   },
-  'Đang xử lý':  { label: 'Đang tiếp nhận',   color: 'bg-blue-100   text-blue-700   border-blue-200'   },
-  'Kiem tra':     { label: 'Đang kiểm tra',    color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
-  'Cho duyet':    { label: 'Chờ Admin duyệt',  color: 'bg-orange-100 text-orange-700 border-orange-200' },
-  'Da duyet':     { label: 'Đã duyệt',         color: 'bg-green-100  text-green-700  border-green-200'  },
-  'Đã duyệt':    { label: 'Đã duyệt',         color: 'bg-green-100  text-green-700  border-green-200'  },
-  'Tu choi':      { label: 'Từ chối',          color: 'bg-red-100    text-red-700    border-red-200'    },
-  'Từ chối':     { label: 'Từ chối',          color: 'bg-red-100    text-red-700    border-red-200'    },
-  'Hoan tien':    { label: 'Đã hoàn tiền',     color: 'bg-purple-100 text-purple-700 border-purple-200' },
-  'Hoan tat':     { label: 'Hoàn tất',         color: 'bg-gray-100   text-gray-600   border-gray-200'   },
-  'Hoàn tất':    { label: 'Hoàn tất',         color: 'bg-gray-100   text-gray-600   border-gray-200'   },
-  'Huy':          { label: 'Đã hủy',           color: 'bg-gray-200   text-gray-500   border-gray-300'   },
-};
+export default function HoanTra(){
+  const [searchParams]=useSearchParams();
+  const navigate=useNavigate();
+  const user=(()=>{try{return JSON.parse(localStorage.getItem('user')||'{}')}catch{return {}}})(); const admin=user.VaiTro==='Admin'; const staff=user.VaiTro==='NhanVien';
+  const detailRequest=useRef(0);
+  const [rows,setRows]=useState<ReturnRow[]>([]),[stats,setStats]=useState<any>(null),[page,setPage]=useState<Page>({page:1,limit:10,total:0,totalPages:1});
+  const [loading,setLoading]=useState(true),[error,setError]=useState(''),[search,setSearch]=useState(''),[appliedSearch,setAppliedSearch]=useState(''),[status,setStatus]=useState(()=>searchParams.get('status')||''),[reason,setReason]=useState(''),[type,setType]=useState(''),[refundStatus,setRefundStatus]=useState(''),[from,setFrom]=useState(''),[to,setTo]=useState('');
+  const [selected,setSelected]=useState<any>(null),[busy,setBusy]=useState(false),[actionError,setActionError]=useState(''),[modal,setModal]=useState(''),[form,setForm]=useState<any>({}),[carriers,setCarriers]=useState<any[]>([]);
+  const load=useCallback(async()=>{setLoading(true);setError('');try{const [list,summary]=await Promise.all([returnsAPI.getAll({page:page.page,limit:page.limit,search:appliedSearch,status,reason,type,from,to,refundStatus}),returnsAPI.getStats()]);setRows(list.data.data||[]);setPage(p=>({...p,...list.data.pagination}));setStats(summary.data.data)}catch(e){setError(errorMessage(e))}finally{setLoading(false)}},[page.page,page.limit,appliedSearch,status,reason,type,from,to,refundStatus]);
+  const loadDetail=useCallback(async(id:number)=>{const requestId=++detailRequest.current;setSelected(null);setActionError('');try{const r=await returnsAPI.getById(id);if(requestId===detailRequest.current)setSelected(r.data.data)}catch(e){if(requestId===detailRequest.current)setError(errorMessage(e))}},[]);
+  useEffect(()=>{void load()},[load]);
+  useEffect(()=>{const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void load()},60000);const onVisible=()=>{if(document.visibilityState==='visible')void load()};document.addEventListener('visibilitychange',onVisible);return()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',onVisible)}},[load]);
+  useEffect(()=>()=>{detailRequest.current++},[]);
+  const refresh=async(id?:number)=>{await load();if(id)await loadDetail(id)};
+  const run=async(fn:()=>Promise<any>)=>{setBusy(true);setActionError('');try{await fn();setModal('');if(selected)await refresh(selected.Id);else await load()}catch(e){setActionError(errorMessage(e))}finally{setBusy(false)}};
+  const openDetail=(row:ReturnRow)=>{void loadDetail(row.Id)};
+  const doReject=(after=false)=>{const text=String(form.reason||'').trim();if(!text){setActionError('Nhập lý do trước khi từ chối');return}void run(()=>after?returnsAPI.rejectAfterInspection(selected.Id,text):returnsAPI.reject(selected.Id,text))};
+  const startShipment=async()=>{try{const r=await returnsAPI.getCarriers();setCarriers(r.data.data||[]);setForm({carrierId:'',fee:'0',payer:'SHOP',note:''});setModal('shipment')}catch(e){setActionError(errorMessage(e))}};
+  const createShipment=()=>void run(()=>returnsAPI.createReturnShipment(selected.Id,{DonViVanChuyenId:Number(form.carrierId),PhiHoan:Number(form.fee)||0,BenChiuPhi:form.payer,GhiChu:form.note}));
+  const inspect=()=>{const items=(selected?.chiTiet||[]).map((item:any)=>({ChiTietYeuCauId:item.Id,SoLuongThucNhan:0,TemCon:null,DaMo:null,DaSuDung:null,TinhTrang:'',PhanLoaiKho:'CHO_XU_LY'}));setForm({items,note:''});setModal('inspection')};
+  const setInspection=(index:number,key:string,value:any)=>setForm((f:any)=>({...f,items:f.items.map((x:any,i:number)=>i===index?{...x,[key]:value}:x)}));
+  const doInspection=()=>{if(form.items.some((item:any)=>item.TemCon===null||item.DaMo===null||item.DaSuDung===null||!String(item.TinhTrang||'').trim())){setActionError('Hãy ghi nhận tình trạng, tem, đã mở và đã sử dụng cho từng sản phẩm');return}void run(()=>returnsAPI.inspect(selected.Id,{items:form.items,KetLuan:form.note,GhiChu:form.note}))};
+  const showRefund=()=>{setForm({method:'CHUYEN_KHOAN',code:'',proof:'',note:''});setModal('refund')};
+  const submitRefund=()=>void run(()=>returnsAPI.refund(selected.Id,{PhuongThuc:form.method,MaGiaoDich:form.code,ChungTuUrl:form.proof,GhiChu:form.note}));
+  const tabs=[['','Tất cả'],['CHO_DUYET','Chờ xem xét'],['DANG_HOAN_VE','Chờ nhận hàng'],['DA_NHAN_HANG_HOAN','Chờ kiểm tra'],['CHO_HOAN_TIEN','Chờ hoàn tiền'],['HOAN_TAT','Hoàn tất']];
+  const input='rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100';
 
-function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_MAP[status] ?? { label: status, color: 'bg-gray-100 text-gray-600 border-gray-200' };
-  return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${s.color}`}>
-      {s.label}
-    </span>
-  );
-}
+  return <div className="min-h-screen bg-[#f6f8fb] p-4 lg:p-6"><div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><div className="mb-2 text-xs text-slate-400">Nhân viên　/　<span className="font-semibold text-slate-600">Hoàn trả</span></div><h1 className="text-2xl font-bold text-slate-900">Hoàn trả</h1><p className="mt-1 text-sm text-slate-500">Tiếp nhận yêu cầu và kiểm tra hàng khách trả</p></div><button onClick={()=>void load()} className="rounded-lg border border-amber-300 px-4 py-2 font-semibold text-amber-800">Làm mới</button></div>
+  <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">{[["ChoDuyet","Chờ xem xét","bg-amber-400"],["DangHoanVe","Chờ nhận hàng","bg-violet-500"],["ChoKiemTra","Chờ kiểm tra","bg-blue-500"],["ChoHoanTien","Chờ hoàn tiền","bg-orange-500"]].map(([key,label,color])=><button key={key} onClick={()=>{setReason('');setType('');setFrom('');setTo('');setRefundStatus(key==='ChoHoanTien'?'CHUA_HOAN':'');const val=key==='ChoDuyet'?'CHO_DUYET':key==='DangHoanVe'?'DANG_HOAN_VE':key==='ChoKiemTra'?'DA_NHAN_HANG_HOAN':'';setStatus(val);setAppliedSearch('');setSearch('');setPage(p=>({...p,page:1}))}} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white p-4 text-left shadow-sm"><span className={`grid h-11 w-11 place-items-center rounded-xl ${color} text-xl text-white`}>{key==='ChoDuyet'?'▤':key==='DangHoanVe'?'↗':key==='ChoKiemTra'?'⬡':'₫'}</span><span><span className="block text-xs text-slate-500">{label}</span><strong className="text-2xl text-slate-900">{stats?.[key]??'—'}</strong></span></button>)}</div>
+  <div className="rounded-xl border border-slate-100 bg-white shadow-sm"><div className="flex gap-1 overflow-x-auto border-b px-3 pt-2">{tabs.map(([value,label])=><button key={label} onClick={()=>{setStatus(value);setRefundStatus('');setPage(p=>({...p,page:1}))}} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm ${status===value?'border-amber-400 font-semibold text-amber-800':'border-transparent text-slate-500'}`}>{label}{value==='CHO_DUYET'&&stats&&<span className="ml-1 rounded-full bg-amber-50 px-1.5 text-xs">{stats.ChoDuyet||0}</span>}</button>)}</div>
+  <form onSubmit={e=>{e.preventDefault();setAppliedSearch(search.trim());setPage(p=>({...p,page:1}))}} className="grid gap-2 border-b p-3 md:grid-cols-2 xl:grid-cols-7"><input className={`${input} xl:col-span-2`} placeholder="Tìm mã yêu cầu, mã đơn, tên hoặc SĐT" value={search} onChange={e=>setSearch(e.target.value)}/><input aria-label="Từ ngày yêu cầu" className={input} type="date" value={from} onChange={e=>setFrom(e.target.value)}/><input aria-label="Đến ngày yêu cầu" className={input} type="date" value={to} onChange={e=>setTo(e.target.value)}/><select className={input} value={reason} onChange={e=>setReason(e.target.value)}><option value="">Mọi lý do</option>{Object.entries(RETURN_REASONS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><select className={input} value={type} onChange={e=>setType(e.target.value)}><option value="">Mọi hình thức</option><option value="HOAN_TIEN">Hoàn tiền</option><option value="DOI_HANG">Đổi hàng</option></select><select className={input} value={refundStatus} onChange={e=>{setRefundStatus(e.target.value);setPage(p=>({...p,page:1}))}}><option value="">Mọi trạng thái tiền</option><option value="CHUA_HOAN">Chưa hoàn đủ</option><option value="DANG_HOAN">Đang hoàn</option><option value="DA_HOAN">Đã hoàn</option><option value="THAT_BAI">Hoàn lỗi</option></select><div className="flex gap-2"><button type="submit" className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-bold text-slate-950">Lọc</button><button type="button" onClick={()=>{setSearch('');setAppliedSearch('');setStatus('');setReason('');setType('');setRefundStatus('');setFrom('');setTo('');setPage(p=>({...p,page:1}))}} className="rounded-lg border px-3 py-2 text-sm">Xóa lọc</button></div></form>
+  {error&&<div className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}<button onClick={()=>void load()} className="ml-3 underline">Thử lại</button></div>}
+  <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr>{['Mã hoàn','Đơn hàng','Khách hàng','Sản phẩm','Lý do','Số tiền dự kiến','Trạng thái','Thao tác'].map(t=><th key={t} className="px-3 py-3 text-left font-semibold">{t}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{loading?<tr><td colSpan={8} className="p-12 text-center text-slate-400">Đang tải yêu cầu hoàn trả…</td></tr>:rows.length===0?<tr><td colSpan={8} className="p-12 text-center text-slate-400">Chưa có yêu cầu hoàn trả nào</td></tr>:rows.map(row=><tr key={row.Id} className="hover:bg-pink-50/50"><td className="px-3 py-3 font-bold text-pink-600">{row.MaYeuCau}</td><td className="px-3 py-3"><div className="font-semibold text-slate-800">{row.MaHoaDonHienThi}</div><div className="text-xs text-slate-400">{today(row.NgayYeuCau)}</div></td><td className="px-3 py-3"><div className="font-medium text-slate-800">{row.TenKhachHang}</div><div className="text-xs text-slate-400">{row.SoDienThoai}</div></td><td className="px-3 py-3"><div className="flex items-center gap-2">{row.HinhAnhDau&&<img src={imageUrl(row.HinhAnhDau)} onError={e=>{e.currentTarget.style.display='none'}} className="h-10 w-10 rounded-lg object-cover"/>}<span className="max-w-40 truncate">{row.TenSanPhamDau||'—'}{row.SoSanPham>1&&<small className="block text-slate-400">+{row.SoSanPham-1} sản phẩm</small>}</span></div></td><td className="max-w-40 truncate px-3 py-3 text-slate-600" title={row.LyDo}>{RETURN_REASONS[row.LyDo]||row.LyDo}</td><td className="px-3 py-3 font-semibold">{formatCurrency(Number(row.SoTienDuKien||0))}</td><td className="px-3 py-3"><Status value={row.TrangThai}/></td><td className="px-3 py-3"><button onClick={()=>openDetail(row)} className="rounded-lg border border-pink-200 px-3 py-2 text-xs font-semibold text-pink-600 hover:bg-pink-50">Xem chi tiết</button></td></tr>)}</tbody></table></div>
+  <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-slate-500"><span>{page.total?`Hiển thị ${(page.page-1)*page.limit+1}–${Math.min(page.page*page.limit,page.total)} trong ${page.total} yêu cầu`:'Không có kết quả'}</span><div className="flex items-center gap-2"><select value={page.limit} onChange={e=>setPage(p=>({...p,limit:Number(e.target.value),page:1}))} className={input}>{[10,20,50].map(n=><option key={n}>{n}</option>)}</select><button disabled={page.page<=1} onClick={()=>setPage(p=>({...p,page:p.page-1}))} className="rounded border px-3 py-2 disabled:opacity-40">‹</button><span>{page.page} / {page.totalPages||1}</span><button disabled={page.page>=page.totalPages} onClick={()=>setPage(p=>({...p,page:p.page+1}))} className="rounded border px-3 py-2 disabled:opacity-40">›</button></div></div></div>
 
-const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString('vi-VN') : '-';
+  {selected&&<div className="fixed inset-0 z-40 bg-slate-950/30" onClick={()=>{detailRequest.current++;setSelected(null)}}><aside onClick={e=>e.stopPropagation()} className="absolute inset-y-0 right-0 flex w-full max-w-[600px] flex-col bg-white shadow-2xl"><header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Chi tiết yêu cầu hoàn trả</h2><div className="mt-1 flex items-center gap-2"><b className="text-amber-700">{selected.MaYeuCau}</b><Status value={selected.TrangThai}/></div></div><button onClick={()=>{detailRequest.current++;setSelected(null)}} className="text-2xl text-slate-400">×</button></header><div className="flex-1 space-y-4 overflow-y-auto p-4">
+  <section className="grid grid-cols-2 gap-2 rounded-xl bg-amber-50 p-4 text-sm"><div><small className="text-slate-500">Đơn hàng</small><b className="block">{selected.MaHoaDonHienThi}</b></div><div><small className="text-slate-500">Khách hàng</small><b className="block">{selected.TenKhachHang}</b></div><div><small className="text-slate-500">Điện thoại</small><b className="block">{selected.SoDienThoai}</b></div><div><small className="text-slate-500">Ngày yêu cầu</small><b className="block">{new Date(selected.NgayYeuCau).toLocaleString('vi-VN')}</b></div><button onClick={()=>navigate(`/invoices/${selected.MaHoaDon}`)} className="col-span-2 rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold text-amber-800">Xem đơn hàng gốc</button></section>
+  <section><h3 className="mb-2 font-bold text-slate-800">Sản phẩm · giá tại thời điểm mua</h3><div className="space-y-2">{(selected.chiTiet||[]).map((item:any)=><div key={item.Id} className="flex items-center gap-3 rounded-lg border p-3">{item.HinhAnh&&<img src={imageUrl(item.HinhAnh)} onError={e=>{e.currentTarget.style.display='none'}} className="h-12 w-12 rounded object-cover"/>}<div className="min-w-0 flex-1"><b className="block truncate text-sm">{item.TenSanPham}</b><span className="block text-xs text-slate-500">Mua {item.SoLuongMua} · yêu cầu {item.SoLuongTra} · thực nhận {item.SoLuongThucNhan??'chưa nhận'} · đã xử lý kho {item.SoLuongDaXuLy||0}</span><span className="text-xs text-slate-500">Đơn giá lúc mua {formatCurrency(item.DonGiaSnapshot)} · giảm phân bổ {formatCurrency(item.GiamGiaPhanBo)} · {item.PhanLoaiKho||'chưa kiểm tra'}</span></div><b className="text-sm">{formatCurrency(item.SoTienDuKien)}</b></div>)}</div></section>
+  <section className="rounded-xl border p-4"><h3 className="mb-2 font-bold">Lý do hoàn trả</h3><p className="text-sm text-pink-700">{RETURN_REASONS[selected.LyDo]||selected.LyDo}</p><p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{selected.MoTa||'Không có mô tả thêm'}</p><p className="mt-3 text-xs text-slate-500">Hình thức: {selected.LoaiYeuCau==='DOI_HANG'?'Đổi hàng':'Hoàn tiền'} · Dự kiến: <b>{formatCurrency(selected.SoTienDuKien)}</b></p></section>
+  <section><h3 className="mb-2 font-bold">Bằng chứng khách gửi</h3>{selected.bangChung?.length?<div className="grid grid-cols-3 gap-2">{selected.bangChung.map((f:any)=><a key={f.Id} href={imageUrl(f.Url)} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border text-xs text-amber-800">{f.Loai==='video'?<div className="grid h-24 place-items-center bg-slate-100">▶ Video</div>:<img src={imageUrl(f.Url)} onError={e=>{e.currentTarget.style.display='none'}} className="h-24 w-full object-cover"/>}<span className="block p-2">Mở tệp</span></a>)}</div>:<p className="text-sm text-slate-400">Chưa có bằng chứng đính kèm</p>}</section>
+  {selected.vanDonHoan&&<section className="rounded-xl border p-4 text-sm"><h3 className="mb-2 font-bold">Vận đơn hoàn</h3><p>{selected.vanDonHoan.MaVanDon} · {selected.vanDonHoan.TenDonVi}</p><p className="text-slate-500">{selected.vanDonHoan.DiaChiLayHang} → {selected.vanDonHoan.DiaChiNhanHang}</p><Status value={selected.vanDonHoan.TrangThai}/></section>}
+  {selected.bienBanKiemTra?.length>0&&<section className="rounded-xl border p-4"><h3 className="mb-2 font-bold">Biên bản kiểm tra</h3>{selected.bienBanKiemTra.map((b:any)=><div key={b.Id} className="mb-2 text-sm"><b>{b.NguoiKiemTra}</b><p>{b.KetLuan||b.GhiChu}</p><p>{b.TinhTrang} · nhận {b.SoLuongThucNhan} · {b.PhanLoaiKho}</p></div>)}</section>}
+  {selected.giaoDichHoanTien?.length>0&&<section className="rounded-xl border p-4"><h3 className="mb-2 font-bold">Giao dịch hoàn tiền</h3>{selected.giaoDichHoanTien.map((f:any)=><div key={f.Id} className="text-sm">{formatCurrency(f.SoTien)} · {f.PhuongThuc} · {f.MaGiaoDich||f.ChungTuUrl}</div>)}</section>}
+  {selected.giaoDichHoanTien?.length>0&&<section className="rounded-xl border p-3"><h3 className="mb-2 font-bold">Hoàn tiền</h3><p className="mb-2 text-sm">Dự kiến {formatCurrency(selected.SoTienDuKien)} · đã hoàn {formatCurrency(selected.SoTienDaHoan)}</p>{selected.giaoDichHoanTien.map((f:any)=><div key={f.Id} className="border-t py-2 text-xs">{formatCurrency(f.SoTien)} · {f.PhuongThuc} · {LABEL[f.TrangThai]||f.TrangThai} · {new Date(f.NgayTao).toLocaleString('vi-VN')}{f.MaGiaoDich&&<span className="block">Mã giao dịch: {f.MaGiaoDich}</span>}{f.ChungTuUrl&&<a className="text-blue-700 underline" href={imageUrl(f.ChungTuUrl)} target="_blank" rel="noreferrer">Xem chứng từ</a>}</div>)}</section>}
+  <section><h3 className="mb-2 font-bold">Tiến trình xử lý</h3><div className="space-y-2 border-l-2 border-amber-200 pl-4">{(selected.timeline||[]).map((t:any)=><div key={t.Id}><b className="text-sm">{LABEL[t.TrangThaiMoi]||t.TrangThaiMoi}</b><p className="text-xs text-slate-500">{new Date(t.NgayTao).toLocaleString('vi-VN')} · {t.TenNguoiThaoTac} {t.GhiChu&&`· ${t.GhiChu}`}</p></div>)}</div></section>
+  {actionError&&<div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{actionError}</div>}</div>
+  <footer className="flex flex-wrap gap-2 border-t p-4">{selected.TrangThai==='CHO_DUYET'&&<><button disabled={busy} onClick={()=>void run(()=>returnsAPI.approve(selected.Id))} className="flex-1 rounded-lg bg-amber-400 px-3 py-3 font-semibold text-slate-950 disabled:opacity-50">Chấp nhận yêu cầu</button><button disabled={busy} onClick={()=>{setForm({reason:''});setModal('reject')}} className="flex-1 rounded-lg border border-red-300 px-3 py-3 font-semibold text-red-600">Từ chối</button></>}{selected.TrangThai==='DA_DUYET'&&<><button disabled={busy} onClick={()=>void startShipment()} className="flex-1 rounded-lg bg-amber-400 px-3 py-3 font-semibold text-slate-950">Tạo vận đơn hoàn</button><button disabled={busy} onClick={()=>void run(()=>returnsAPI.selfShip(selected.Id))} className="flex-1 rounded-lg border px-3 py-3">Khách tự gửi</button></>}{selected.TrangThai==='CHO_KHACH_GUI_HANG'&&<button disabled={busy} onClick={()=>{setForm({code:''});setModal('sent')}} className="flex-1 rounded-lg bg-blue-600 px-3 py-3 font-semibold text-white">Xác nhận khách đã gửi</button>}{selected.TrangThai==='CHO_LAY_HANG_HOAN'&&selected.vanDonHoan&&<button disabled={busy} onClick={()=>void run(()=>returnsAPI.shipmentEvent(selected.Id,selected.vanDonHoan.Id,{action:'picked_up'}))} className="flex-1 rounded-lg bg-blue-600 px-3 py-3 font-semibold text-white">Xác nhận đã lấy hàng</button>}{selected.TrangThai==='DA_LAY_HANG_HOAN'&&<button disabled={busy} onClick={()=>void run(()=>returnsAPI.shipmentEvent(selected.Id,selected.vanDonHoan.Id,{action:'in_transit'}))} className="flex-1 rounded-lg bg-blue-600 px-3 py-3 font-semibold text-white">Đang hoàn về</button>}{selected.TrangThai==='DANG_HOAN_VE'&&<button disabled={busy} onClick={()=>void run(()=>returnsAPI.received(selected.Id))} className="flex-1 rounded-lg bg-amber-400 px-3 py-3 font-semibold text-slate-950">Xác nhận đã nhận hàng hoàn</button>}{selected.TrangThai==='DA_NHAN_HANG_HOAN'&&<button disabled={busy} onClick={()=>void run(()=>returnsAPI.beginInspection(selected.Id))} className="flex-1 rounded-lg bg-blue-600 px-3 py-3 font-semibold text-white">Bắt đầu kiểm tra</button>}{selected.TrangThai==='DANG_KIEM_TRA'&&<><button disabled={busy} onClick={inspect} className="flex-1 rounded-lg bg-blue-600 px-3 py-3 font-semibold text-white">Lập biên bản kiểm tra</button><button disabled={busy} onClick={()=>{setForm({reason:''});setModal('rejectAfter')}} className="rounded-lg border border-red-300 px-3 py-3 text-red-600">Từ chối sau kiểm tra</button></>}{admin&&selected.TrangThai==='CHAP_NHAN_HOAN'&&<button disabled={busy} onClick={()=>void run(()=>returnsAPI.processInventory(selected.Id))} className="flex-1 rounded-lg bg-amber-400 px-3 py-3 font-semibold text-slate-950">Xử lý kho</button>}{admin&&selected.TrangThai==='CHO_HOAN_TIEN'&&<button disabled={busy} onClick={showRefund} className="flex-1 rounded-lg bg-amber-400 px-3 py-3 font-semibold text-slate-950">Ghi nhận hoàn tiền</button>}{staff&&['CHAP_NHAN_HOAN','CHO_HOAN_TIEN'].includes(selected.TrangThai)&&<p className="w-full rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Nhập kho và xác nhận hoàn tiền cần quyền Admin.</p>}</footer></aside></div>}
 
-interface Stats { choXuLy: number; tiepNhan: number; kiemTra: number; choDuyet: number; daDuyet: number; tuChoi: number; hoanTien: number; hoanTat: number; tongYeuCau: number; tongTienHoan: number; }
-interface ReturnRow { MaHoanDoiTra: number; MaYeuCau: string; MaHoaDonHienThi: string; TenKhachHang: string; SoDienThoai: string; LoaiYeuCau: string; LyDo: string; TrangThai: string; NgayYeuCau: string; SoTienHoan: number; TenSanPhamDau: string; SoSanPham: number; }
-
-// ══════════════════════════════════════════════════════════════════════════════
-export default function HoanTra() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const isAdmin = user.VaiTro === 'Admin';
-
-  const [stats, setStats]             = useState<Stats | null>(null);
-  const [rows, setRows]               = useState<ReturnRow[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [pagination, setPagination]   = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
-
-  // Đọc filter từ URL query params (từ Dashboard)
-  const [search, setSearch]           = useState('');
-  const [filterStatus, setFilterStatus] = useState(searchParams.get('status') || '');
-  const [filterLoai, setFilterLoai]   = useState('');
-  const [filterTuNgay, setFilterTuNgay] = useState('');
-  const [filterDenNgay, setFilterDenNgay] = useState('');
-
-  // ── load ──────────────────────────────────────────────────────────────────
-  const loadStats = useCallback(async () => {
-    try {
-      const r = await axios.get(`${API}/hoandoitra/statistics`, { headers: getToken() });
-      setStats(r.data.data);
-    } catch {}
-  }, []);
-
-  const loadRows = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: any = { page: pagination.page, limit: pagination.limit };
-      if (search)         params.search   = search;
-      if (filterStatus)   params.status   = filterStatus;
-      if (filterLoai)     params.loai     = filterLoai;
-      if (filterTuNgay)   params.tuNgay   = filterTuNgay;
-      if (filterDenNgay)  params.denNgay  = filterDenNgay;
-      const r = await axios.get(`${API}/hoandoitra`, { headers: getToken(), params });
-      setRows(r.data.data || []);
-      if (r.data.pagination) setPagination(r.data.pagination);
-    } catch {}
-    finally { setLoading(false); }
-  }, [pagination.page, pagination.limit, search, filterStatus, filterLoai, filterTuNgay, filterDenNgay]);
-
-  useEffect(() => { loadStats(); }, []);
-  useEffect(() => { loadRows(); }, [pagination.page, pagination.limit]);
-
-  const handleSearch = () => { setPagination(p => ({ ...p, page: 1 })); loadRows(); };
-  const handleReset  = () => {
-    setSearch(''); setFilterStatus(''); setFilterLoai('');
-    setFilterTuNgay(''); setFilterDenNgay('');
-    setPagination(p => ({ ...p, page: 1 }));
-    setTimeout(loadRows, 100);
-  };
-
-  // Quick action trực tiếp từ bảng
-  const handleQuickAction = async (id: number, action: string, body: object) => {
-    try {
-      await axios.post(`${API}/hoandoitra/${id}/${action}`, body, { headers: getToken() });
-      loadRows(); loadStats();
-    } catch (e: any) {
-      alert(e.response?.data?.message || 'Có lỗi xảy ra');
-    }
-  };
-
-  // ── stat cards ────────────────────────────────────────────────────────────
-  const statCards = [
-    { label: 'Chờ xử lý',     value: stats?.choXuLy   ?? '-', color: 'bg-yellow-50 border-yellow-200', dot: 'bg-yellow-400', filter: 'Cho xu ly' },
-    { label: 'Đang kiểm tra', value: stats?.kiemTra    ?? '-', color: 'bg-blue-50   border-blue-200',   dot: 'bg-blue-400',   filter: 'Kiem tra'  },
-    { label: 'Chờ Admin duyệt',value: stats?.choDuyet  ?? '-', color: 'bg-orange-50 border-orange-200', dot: 'bg-orange-400', filter: 'Cho duyet' },
-    { label: 'Đã từ chối',    value: stats?.tuChoi     ?? '-', color: 'bg-red-50    border-red-200',    dot: 'bg-red-400',    filter: 'Tu choi'   },
-  ];
-
-  return (
-    <div className="p-6 bg-gray-50 min-h-screen">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl p-6 mb-6">
-        <div className="flex justify-between items-center flex-wrap gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Quản lý hoàn trả</h1>
-            <p className="text-sm text-gray-500 mt-1">Tiếp nhận, kiểm tra và xử lý yêu cầu hoàn trả sản phẩm</p>
-          </div>
-          <button className="px-4 py-2 border border-gray-300 bg-white rounded-lg text-sm text-gray-600 hover:bg-gray-50 font-medium shadow-sm">
-            Xuất báo cáo
-          </button>
-        </div>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {statCards.map(c => (
-          <button key={c.label} onClick={() => { setFilterStatus(c.filter); handleSearch(); }}
-            className={`bg-white border ${c.color} rounded-xl p-5 text-left hover:shadow-md transition-shadow`}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`}></span>
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{c.label}</span>
-            </div>
-            <p className="text-3xl font-bold text-gray-800">{c.value}</p>
-          </button>
-        ))}
-      </div>
-
-      {/* Tổng hoàn tiền */}
-      {stats && (
-        <div className="bg-white border border-pink-100 rounded-xl p-4 mb-6 flex items-center gap-4">
-          <div className="w-10 h-10 bg-pink-100 rounded-xl flex items-center justify-center text-pink-600 font-bold text-lg">₫</div>
-          <div>
-            <p className="text-xs text-gray-500">Tổng tiền đã hoàn trả</p>
-            <p className="text-xl font-bold text-pink-600">{formatCurrency(stats.tongTienHoan)}</p>
-          </div>
-          <div className="ml-auto text-right">
-            <p className="text-xs text-gray-500">Tổng yêu cầu</p>
-            <p className="text-xl font-bold text-gray-800">{stats.tongYeuCau}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Filter */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-        <div className="flex flex-wrap gap-3">
-          <input
-            value={search} onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            placeholder="Tìm mã đơn, khách hàng, sản phẩm..."
-            className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-400"
-          />
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-400">
-            <option value="">Tất cả trạng thái</option>
-            <option value="Cho xu ly">Chờ xử lý</option>
-            <option value="Tiep nhan">Đang tiếp nhận</option>
-            <option value="Kiem tra">Đang kiểm tra</option>
-            <option value="Cho duyet">Chờ Admin duyệt</option>
-            <option value="Da duyet">Đã duyệt</option>
-            <option value="Tu choi">Từ chối</option>
-            <option value="Hoan tien">Đã hoàn tiền</option>
-            <option value="Hoan tat">Hoàn tất</option>
-          </select>
-          <select value={filterLoai} onChange={e => setFilterLoai(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-400">
-            <option value="">Tất cả loại</option>
-            <option value="Trả hàng">Hoàn trả</option>
-            <option value="Đổi hàng">Đổi sản phẩm</option>
-          </select>
-          <input type="date" value={filterTuNgay} onChange={e => setFilterTuNgay(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-400" />
-          <input type="date" value={filterDenNgay} onChange={e => setFilterDenNgay(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-400" />
-          <button onClick={handleSearch}
-            className="px-4 py-2 bg-pink-500 text-white rounded-lg text-sm font-medium hover:bg-pink-600">
-            Tìm kiếm
-          </button>
-          <button onClick={handleReset}
-            className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">
-            Đặt lại
-          </button>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-10">STT</th>
-                <th className="px-4 py-3 text-left   text-xs font-medium text-gray-500 uppercase">Mã yêu cầu</th>
-                <th className="px-4 py-3 text-left   text-xs font-medium text-gray-500 uppercase">Mã đơn hàng</th>
-                <th className="px-4 py-3 text-left   text-xs font-medium text-gray-500 uppercase">Khách hàng</th>
-                <th className="px-4 py-3 text-left   text-xs font-medium text-gray-500 uppercase">Sản phẩm</th>
-                <th className="px-4 py-3 text-left   text-xs font-medium text-gray-500 uppercase">Loại</th>
-                <th className="px-4 py-3 text-left   text-xs font-medium text-gray-500 uppercase">Lý do</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Ngày YC</th>
-                <th className="px-4 py-3 text-right  text-xs font-medium text-gray-500 uppercase">Số tiền</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Trạng thái</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {loading ? (
-                <tr><td colSpan={11} className="py-12 text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-500 mx-auto mb-2"></div>
-                  <p className="text-sm text-gray-400">Đang tải...</p>
-                </td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="py-16 text-center">
-                  <div className="text-5xl mb-3 opacity-30">📦</div>
-                  <p className="text-gray-500 font-medium">Không có yêu cầu hoàn trả</p>
-                  <p className="text-gray-400 text-xs mt-1">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm</p>
-                </td></tr>
-              ) : rows.map((row, idx) => (
-                <tr key={row.MaHoanDoiTra} className="hover:bg-pink-50 transition-colors">
-                  <td className="px-4 py-3 text-center text-gray-500">{(pagination.page-1)*pagination.limit+idx+1}</td>
-                  <td className="px-4 py-3 font-semibold text-pink-600">{row.MaYeuCau}</td>
-                  <td className="px-4 py-3 text-blue-600 font-medium">{row.MaHoaDonHienThi}</td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-800">{row.TenKhachHang}</p>
-                    <p className="text-xs text-gray-400">{row.SoDienThoai}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="text-gray-800 max-w-36 truncate">{row.TenSanPhamDau || '-'}</p>
-                    {row.SoSanPham > 1 && <p className="text-xs text-gray-400">+{row.SoSanPham - 1} sản phẩm</p>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.LoaiYeuCau?.includes('Đổi') || row.LoaiYeuCau?.includes('doi') ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>
-                      {row.LoaiYeuCau?.includes('Đổi') || row.LoaiYeuCau?.includes('doi') ? 'Đổi SP' : 'Hoàn trả'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600 max-w-32 truncate" title={row.LyDo}>{row.LyDo || '-'}</td>
-                  <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">{fmtDate(row.NgayYeuCau)}</td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-800">
-                    {row.SoTienHoan ? formatCurrency(row.SoTienHoan) : '-'}
-                  </td>
-                  <td className="px-4 py-3 text-center"><StatusBadge status={row.TrangThai} /></td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex justify-center gap-1 flex-wrap">
-                      <button onClick={() => navigate(`/returns/${row.MaHoanDoiTra}`)}
-                        className="px-3 py-1.5 bg-pink-50 text-pink-600 border border-pink-200 rounded-lg text-xs font-medium hover:bg-pink-100 transition-colors">
-                        Chi tiết
-                      </button>
-                      {/* Quick actions theo trạng thái */}
-                      {['Cho xu ly','Chờ xử lý'].includes(row.TrangThai) && (
-                        <button onClick={() => handleQuickAction(row.MaHoanDoiTra, 'receive', {})}
-                          className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors">
-                          Tiếp nhận
-                        </button>
-                      )}
-                      {isAdmin && ['Cho duyet','Chờ Admin duyệt'].includes(row.TrangThai) && (
-                        <button onClick={() => navigate(`/returns/${row.MaHoanDoiTra}`)}
-                          className="px-3 py-1.5 bg-green-50 text-green-600 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors">
-                          Duyệt
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        {pagination.totalPages > 0 && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
-            <p className="text-sm text-gray-500">
-              Hiển thị {rows.length === 0 ? 0 : (pagination.page-1)*pagination.limit+1}–{Math.min(pagination.page*pagination.limit, pagination.total)} / {pagination.total} yêu cầu
-            </p>
-            <div className="flex items-center gap-2">
-              <button disabled={pagination.page===1} onClick={() => setPagination(p => ({...p, page: p.page-1}))}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-white">‹</button>
-              {Array.from({length: Math.min(pagination.totalPages, 7)}, (_, i) => i+1).map(pg => (
-                <button key={pg} onClick={() => setPagination(p => ({...p, page: pg}))}
-                  className={`px-3 py-1.5 border rounded-lg text-sm ${pg===pagination.page ? 'bg-pink-500 text-white border-pink-500' : 'border-gray-300 hover:bg-white'}`}>
-                  {pg}
-                </button>
-              ))}
-              <button disabled={pagination.page===pagination.totalPages} onClick={() => setPagination(p => ({...p, page: p.page+1}))}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-white">›</button>
-            </div>
-            <select value={pagination.limit} onChange={e => setPagination(p => ({...p, limit: +e.target.value, page: 1}))}
-              className="border border-gray-300 rounded-lg text-sm px-2 py-1.5 bg-white">
-              {[10,20,50,100].map(n => <option key={n} value={n}>{n}/trang</option>)}
-            </select>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  {modal==='reject'&&<Modal title="Từ chối yêu cầu hoàn trả" close={()=>setModal('')}><textarea className={`${input} min-h-24 w-full`} value={form.reason||''} onChange={e=>setForm({...form,reason:e.target.value})} placeholder="Nhập lý do bắt buộc"/><button disabled={busy||!form.reason?.trim()} onClick={()=>doReject()} className="mt-3 w-full rounded-lg bg-red-600 p-3 font-semibold text-white disabled:opacity-50">Xác nhận từ chối</button></Modal>}
+  {modal==='rejectAfter'&&<Modal title="Từ chối sau kiểm tra" close={()=>setModal('')}><textarea className={`${input} min-h-24 w-full`} value={form.reason||''} onChange={e=>setForm({...form,reason:e.target.value})} placeholder="Nhập lý do bắt buộc"/><button disabled={busy||!form.reason?.trim()} onClick={()=>doReject(true)} className="mt-3 w-full rounded-lg bg-red-600 p-3 font-semibold text-white disabled:opacity-50">Xác nhận từ chối</button></Modal>}
+  {modal==='shipment'&&<Modal title="Tạo vận đơn hoàn" close={()=>setModal('')}><div className="space-y-3"><select className={`${input} w-full`} value={form.carrierId} onChange={e=>setForm({...form,carrierId:e.target.value})}><option value="">Chọn đơn vị vận chuyển</option>{carriers.map(c=><option key={c.Id} value={c.Id}>{c.TenDonVi}</option>)}</select><input className={`${input} w-full`} type="number" min="0" value={form.fee} onChange={e=>setForm({...form,fee:e.target.value})} placeholder="Phí hoàn hàng"/><select className={`${input} w-full`} value={form.payer} onChange={e=>setForm({...form,payer:e.target.value})}><option value="SHOP">Shop chịu phí</option><option value="KHACH_HANG">Khách chịu phí</option></select><input className={`${input} w-full`} value={form.note} onChange={e=>setForm({...form,note:e.target.value})} placeholder="Ghi chú"/><p className="text-xs text-slate-500">Địa chỉ lấy lấy từ hồ sơ khách; điểm nhận: BeautyStore. COD = 0.</p><button disabled={busy||!form.carrierId} onClick={createShipment} className="w-full rounded-lg bg-amber-600 p-3 font-semibold text-white disabled:opacity-50">Tạo vận đơn</button></div></Modal>}
+  {modal==='sent'&&<Modal title="Xác nhận khách đã gửi hàng" close={()=>setModal('')}><input className={`${input} w-full`} value={form.code} onChange={e=>setForm({...form,code:e.target.value})} placeholder="Mã vận đơn khách gửi (nếu có)"/><button disabled={busy} onClick={()=>void run(()=>returnsAPI.customerSent(selected.Id,form.code))} className="mt-3 w-full rounded-lg bg-blue-600 p-3 font-semibold text-white">Xác nhận</button></Modal>}
+  {modal==='inspection'&&<Modal title="Biên bản kiểm tra hàng hoàn" close={()=>setModal('')}><div className="max-h-[60vh] space-y-3 overflow-y-auto">{(form.items||[]).map((item:any,index:number)=>{const product=selected.chiTiet.find((x:any)=>x.Id===item.ChiTietYeuCauId);return <div key={item.ChiTietYeuCauId} className="rounded-lg border p-3"><b className="text-sm">{product?.TenSanPham} · khách yêu cầu {product?.SoLuongTra}</b><div className="mt-2 grid grid-cols-2 gap-2"><label className="text-xs font-semibold">Số lượng thực nhận<input aria-label={`Số lượng thực nhận ${product?.TenSanPham}`} className={`${input} mt-1 w-full`} type="number" min="0" max={product?.SoLuongTra} value={item.SoLuongThucNhan} onChange={e=>setInspection(index,'SoLuongThucNhan',Number(e.target.value))}/></label><label className="text-xs font-semibold">Kết quả xử lý kho<select className={`${input} mt-1 w-full`} value={item.PhanLoaiKho} onChange={e=>setInspection(index,'PhanLoaiKho',e.target.value)}><option value="BAN_LAI">Đủ điều kiện bán lại</option><option value="HANG_HONG">Hàng hỏng</option><option value="CHO_XU_LY">Cách ly/chờ xử lý</option><option value="TU_CHOI_NHAN">Không chấp nhận</option></select></label><select className={input} aria-label="Tình trạng tem" value={String(item.TemCon)} onChange={e=>setInspection(index,'TemCon',e.target.value==='true')}><option value="null" disabled>Ghi nhận tình trạng tem</option><option value="false">Tem mất/không rõ</option><option value="true">Tem còn</option></select><select className={input} aria-label="Sản phẩm đã mở" value={String(item.DaMo)} onChange={e=>setInspection(index,'DaMo',e.target.value==='true')}><option value="null" disabled>Ghi nhận đã mở?</option><option value="true">Đã mở</option><option value="false">Chưa mở</option></select><select className={input} aria-label="Sản phẩm đã sử dụng" value={String(item.DaSuDung)} onChange={e=>setInspection(index,'DaSuDung',e.target.value==='true')}><option value="null" disabled>Ghi nhận đã dùng?</option><option value="false">Chưa sử dụng</option><option value="true">Đã sử dụng</option></select><input aria-label="Tình trạng thực tế" className={input} value={item.TinhTrang} onChange={e=>setInspection(index,'TinhTrang',e.target.value)} placeholder="Tình trạng thực tế"/></div></div>})}<textarea className={`${input} w-full`} value={form.note} onChange={e=>setForm({...form,note:e.target.value})} placeholder="Ghi chú kiểm tra"/><button disabled={busy} onClick={doInspection} className="w-full rounded-lg bg-amber-400 p-3 font-semibold text-slate-950 disabled:opacity-50">Lưu biên bản</button></div></Modal>}
+  {modal==='refund'&&<Modal title="Xác nhận hoàn tiền" close={()=>setModal('')}><div className="space-y-3"><p className="rounded-lg bg-emerald-50 p-3 text-sm">Backend tự tính số hoàn còn lại: <b>{formatCurrency(Math.max(0,Number(selected.SoTienDuKien)-Number(selected.SoTienDaHoan)))}</b></p><select className={`${input} w-full`} value={form.method} onChange={e=>setForm({...form,method:e.target.value})}><option value="CHUYEN_KHOAN">Chuyển khoản ngân hàng</option><option value="VI_DIEN_TU">Ví điện tử</option><option value="TIEN_MAT">Tiền mặt</option></select><input className={`${input} w-full`} value={form.code} onChange={e=>setForm({...form,code:e.target.value})} placeholder="Mã giao dịch"/><input className={`${input} w-full`} value={form.proof} onChange={e=>setForm({...form,proof:e.target.value})} placeholder="URL chứng từ (cần mã giao dịch hoặc chứng từ)"/><button disabled={busy||(!form.code&&!form.proof)} onClick={submitRefund} className="w-full rounded-lg bg-emerald-600 p-3 font-semibold text-white disabled:opacity-50">Xác nhận đã hoàn tiền</button></div></Modal>}
+    {selected?.TrangThai==='DANG_KIEM_TRA'&&selected?.bienBanKiemTra?.length>0&&<div className="fixed bottom-5 right-5 z-30 flex gap-2 rounded-xl border bg-white p-3 shadow-xl"><button onClick={()=>{setForm({reason:''});setModal('rejectAfter')}} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-600">Từ chối sau kiểm tra</button><button disabled={busy} onClick={()=>void run(()=>returnsAPI.acceptAfterInspection(selected.Id))} className="rounded-lg bg-pink-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Chấp nhận sau kiểm tra</button></div>}
+    {selected?.vanDonHoan?.TrangThai==='THAT_BAI'&&<div className="fixed bottom-5 right-5 z-30 rounded-xl border bg-white p-3 shadow-xl"><button disabled={busy} onClick={()=>void run(()=>returnsAPI.shipmentEvent(selected.Id,selected.vanDonHoan.Id,{action:'retry'}))} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Thử lấy hàng lại</button></div>}
+    {selected?.TrangThai==='CHO_KHACH_GUI_HANG'&&<div className="fixed bottom-5 right-5 z-30 rounded-xl border bg-white p-3 shadow-xl"><button disabled={busy} onClick={()=>{const reason=window.prompt('Nhập lý do hủy yêu cầu');if(reason?.trim())void run(()=>returnsAPI.cancel(selected.Id,reason.trim()))}} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-600">Hủy yêu cầu</button></div>}
+  </div>
 }
